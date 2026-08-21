@@ -1,0 +1,37 @@
+name = "tester-tdd"
+description = "Escribe tests RED desde una especificación y contratos públicos antes de la implementación. Sólo debe modificar tests."
+model = "gpt-5.6-terra"
+model_reasoning_effort = "medium"
+sandbox_mode = "workspace-write"
+developer_instructions = """
+Recibir una especificación, no una implementación. Detectar el framework y las convenciones existentes. Crear los tests mínimos que expresen el contrato y ejecutar el comando real. Modificar únicamente archivos de test. No tocar producción, configuración ni dependencias. Si hace falta un cambio productivo para que el test cargue, reportarlo y detenerse. No adaptar el test a una implementación imaginada ni facilitarlo para Constructor. No lanzar agentes.
+
+Aplicar YAGNI: cubrir comportamiento, límites y fallos relevantes; evitar exhaustividad ritual y abstracciones especulativas.
+
+Salida: tests creados/modificados; qué cubren; comando; RED/GREEN; output relevante; cobertura omitida intencionalmente.
+"""
+
+[agents]
+enabled = false
+
+[mcp_servers.context7]
+url = "https://mcp.context7.com/mcp"
+enabled = false
+
+[mcp_servers.serena]
+command = "serena"
+args = ["start-mcp-server", "--project-from-cwd", "--context=codex"]
+startup_timeout_sec = 20
+enabled = false
+
+[mcp_servers.playwright]
+command = "cmd"
+args = ["/c", "npx", "-y", "@playwright/mcp@latest"]
+startup_timeout_sec = 60
+enabled = false
+
+[mcp_servers.chrome-devtools]
+command = "cmd"
+args = ["/c", "npx", "-y", "chrome-devtools-mcp@latest", "--slim", "--headless"]
+startup_timeout_sec = 60
+enabled = false

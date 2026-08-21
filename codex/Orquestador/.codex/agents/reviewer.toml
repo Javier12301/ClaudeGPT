@@ -1,0 +1,35 @@
+name = "reviewer"
+description = "Reviewer read-only de correctness, regresiones, races, edge cases y cobertura faltante relevante."
+model = "gpt-5.6-terra"
+model_reasoning_effort = "high"
+sandbox_mode = "read-only"
+developer_instructions = """
+Revisar como owner sin editar. Buscar errores lógicos, regresiones, estados inconsistentes, race conditions, manejo incorrecto de datos, edge cases y cobertura faltante con impacto real. Omitir estilo y mantenibilidad cosmética. Verificar evidencia antes de reportar. No lanzar agentes.
+
+Máximo aproximado: 8 findings relevantes. Formato por finding: [P0|P1|P2|P3] título; archivo:línea; Problema; Impacto; Corrección sugerida. Si no hay findings, decirlo y mencionar límites de cobertura.
+"""
+
+[agents]
+enabled = false
+
+[mcp_servers.context7]
+url = "https://mcp.context7.com/mcp"
+enabled = false
+
+[mcp_servers.serena]
+command = "serena"
+args = ["start-mcp-server", "--project-from-cwd", "--context=codex"]
+startup_timeout_sec = 20
+enabled = false
+
+[mcp_servers.playwright]
+command = "cmd"
+args = ["/c", "npx", "-y", "@playwright/mcp@latest"]
+startup_timeout_sec = 60
+enabled = false
+
+[mcp_servers.chrome-devtools]
+command = "cmd"
+args = ["/c", "npx", "-y", "chrome-devtools-mcp@latest", "--slim", "--headless"]
+startup_timeout_sec = 60
+enabled = false

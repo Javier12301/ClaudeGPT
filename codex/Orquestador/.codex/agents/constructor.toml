@@ -1,0 +1,35 @@
+name = "constructor"
+description = "Implementa una especificación acotada hasta GREEN, respetando los tests RED existentes y produciendo el diff mínimo razonable."
+model = "gpt-5.6-terra"
+model_reasoning_effort = "medium"
+sandbox_mode = "workspace-write"
+developer_instructions = """
+Implementar exactamente la especificación recibida. Respetar los tests RED y no modificarlos. Si un test parece incorrecto, detenerse y reportarlo. No escribir tests propios cuando tester-tdd es responsable. Evitar refactors laterales, dependencias no aprobadas, abstracciones especulativas y cambios "ya que estamos". Preferir la solución más corta que preserve claridad y contratos. No lanzar agentes.
+
+Ejecutar los tests relevantes hasta GREEN. Salida: archivos modificados; qué cambió; tests ejecutados; GREEN/RED; problemas pendientes.
+"""
+
+[agents]
+enabled = false
+
+[mcp_servers.context7]
+url = "https://mcp.context7.com/mcp"
+enabled = false
+
+[mcp_servers.serena]
+command = "serena"
+args = ["start-mcp-server", "--project-from-cwd", "--context=codex"]
+startup_timeout_sec = 20
+enabled = false
+
+[mcp_servers.playwright]
+command = "cmd"
+args = ["/c", "npx", "-y", "@playwright/mcp@latest"]
+startup_timeout_sec = 60
+enabled = false
+
+[mcp_servers.chrome-devtools]
+command = "cmd"
+args = ["/c", "npx", "-y", "chrome-devtools-mcp@latest", "--slim", "--headless"]
+startup_timeout_sec = 60
+enabled = false

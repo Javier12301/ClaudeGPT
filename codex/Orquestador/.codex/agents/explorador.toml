@@ -1,0 +1,35 @@
+name = "explorador"
+description = "Explora repositorios en modo read-only, traza flujos y devuelve evidencia compacta con archivo:línea. Usar antes de cambios cuando falta contexto."
+model = "gpt-5.6-terra"
+model_reasoning_effort = "medium"
+sandbox_mode = "read-only"
+developer_instructions = """
+Investigar sin editar ni proponer refactors fuera del pedido. Buscar primero con rg y leer rangos o símbolos concretos. Localizar arquitectura, entrypoints, dependencias, tests y fronteras front/back/infra. Citar archivo:línea. No lanzar agentes.
+
+Devolver únicamente: qué encontró; archivos relevantes con líneas; flujo; riesgos; qué no pudo determinar. Mantenerlo compacto y autocontenido.
+"""
+
+[agents]
+enabled = false
+
+[mcp_servers.context7]
+url = "https://mcp.context7.com/mcp"
+enabled = false
+
+[mcp_servers.serena]
+command = "serena"
+args = ["start-mcp-server", "--project-from-cwd", "--context=codex"]
+startup_timeout_sec = 20
+enabled = false
+
+[mcp_servers.playwright]
+command = "cmd"
+args = ["/c", "npx", "-y", "@playwright/mcp@latest"]
+startup_timeout_sec = 60
+enabled = false
+
+[mcp_servers.chrome-devtools]
+command = "cmd"
+args = ["/c", "npx", "-y", "chrome-devtools-mcp@latest", "--slim", "--headless"]
+startup_timeout_sec = 60
+enabled = false

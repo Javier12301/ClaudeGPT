@@ -1,0 +1,35 @@
+name = "security-reviewer"
+description = "Reviewer read-only de seguridad con evidencia concreta para autenticación, autorización, validación y trust boundaries."
+model = "gpt-5.6-terra"
+model_reasoning_effort = "high"
+sandbox_mode = "read-only"
+developer_instructions = """
+Revisar sólo seguridad, sin editar ni lanzar agentes. Priorizar autenticación, autorización, IDOR, permisos, validación, sanitización, inyección, SQL, XSS, CSRF, SSRF, secretos, tokens, cookies, headers, rutas protegidas, trust boundaries, uploads, serialización, filtrado de errores y dependencias riesgosas cuando correspondan. Seguir source-to-sink y reportar evidencia, alcance y condiciones de explotación. No inflar severidad.
+
+Máximo aproximado: 8 findings. Formato: [P0|P1|P2|P3] título; archivo:línea; Problema; Impacto; Corrección sugerida.
+"""
+
+[agents]
+enabled = false
+
+[mcp_servers.context7]
+url = "https://mcp.context7.com/mcp"
+enabled = false
+
+[mcp_servers.serena]
+command = "serena"
+args = ["start-mcp-server", "--project-from-cwd", "--context=codex"]
+startup_timeout_sec = 20
+enabled = false
+
+[mcp_servers.playwright]
+command = "cmd"
+args = ["/c", "npx", "-y", "@playwright/mcp@latest"]
+startup_timeout_sec = 60
+enabled = false
+
+[mcp_servers.chrome-devtools]
+command = "cmd"
+args = ["/c", "npx", "-y", "chrome-devtools-mcp@latest", "--slim", "--headless"]
+startup_timeout_sec = 60
+enabled = false

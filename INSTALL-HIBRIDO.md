@@ -1,0 +1,272 @@
+# Instalación del Orquestador Híbrido
+
+Guía para dejar el entorno completo funcionando desde cero en otra máquina
+(Windows + PowerShell 5.1). Qué hace y por qué: [README.md](README.md).
+
+Tiempo estimado: 20–30 min, casi todo esperando descargas.
+
+---
+
+## Índice
+
+1. [Prerequisitos](#1-prerequisitos)
+2. [Kit Claude](#2-kit-claude)
+3. [Kit Codex](#3-kit-codex)
+4. [Puente híbrido](#4-puente-híbrido)
+5. [Verificación](#5-verificación)
+6. [Smoke tests](#6-smoke-tests)
+7. [Actualizar y desinstalar](#7-actualizar-y-desinstalar)
+8. [Problemas conocidos](#8-problemas-conocidos)
+
+---
+
+## 1. Prerequisitos
+
+```powershell
+claude --version      # probado con 2.1.237
+codex  --version      # probado con 0.147.0
+git    --version
+node   --version      # solo para los MCP de navegador
+```
+
+Ambos CLIs autenticados con **suscripción**, no con API key:
+
+```powershell
+codex login           # elegí "Sign in with ChatGPT"
+codex login status    # debe decir: Logged in using ChatGPT
+```
+
+> El wrapper nunca cae a API key automáticamente: cambiaría el modelo de
+> facturación esperado sin que lo pidas.
+
+---
+
+## 2. Kit Claude
+
+Seguí [`Orquestador/INSTALL.md`](Orquestador/INSTALL.md) completo. Resumen:
+
+```powershell
+# plugins (desde una sesión de Claude Code)
+/plugin marketplace add Gentleman-Programming/engram
+/plugin install engram@engram
+/plugin marketplace add DietrichGebert/ponytail
+/plugin install ponytail@ponytail
+
+# MCPs
+claude mcp add --scope user context7 -- npx -y @upstash/context7-mcp@latest
+winget install --id=astral-sh.uv -e     # cerrá y reabrí la terminal
+uv tool install -p 3.13 serena-agent
+claude mcp add --scope user serena -- serena start-mcp-server --context claude-code --project-from-cwd
+```
+
+Skill, agentes y statusline:
+
+```powershell
+$dst = "$env:USERPROFILE\.claude"
+New-Item -ItemType Directory -Force "$dst\skills\orquestador","$dst\agents" | Out-Null
+Copy-Item ".\Orquestador\skills\orquestador\SKILL.md" "$dst\skills\orquestador\" -Force
+Copy-Item ".\Orquestador\agents\*.md"                 "$dst\agents\"           -Force
+
+git clone https://github.com/daniel3303/ClaudeCodeStatusLine "$dst\statusline"
+Copy-Item ".\Orquestador\statusline-wrapper.ps1" "$dst\" -Force
+```
+
+> La statusline **no es opcional en el entorno híbrido**: su cache es de donde el
+> wrapper lee la cuota de Claude. Sin ella, esa mitad del gate de presupuesto
+> queda ciega y se trata como WARN.
+
+---
+
+## 3. Kit Codex
+
+```powershell
+cd codex\Orquestador
+Set-ExecutionPolicy -Scope Process Bypass
+.\install.ps1
+.\verify.ps1 -Global
+```
+
+Instala los 9 roles en `~/.codex/agents`, las skills en `~/.agents/skills`, la
+regla y el hook de git, y fusiona los defaults en `~/.codex/config.toml` sin
+pisar configuración ajena. Los backups quedan en `~/.codex/orquestador-backups\`.
+
+Después, **dentro de Codex**, confiá el hook:
+
+```text
+/hooks
+```
+
+---
+
+## 4. Puente híbrido
+
+Los tres archivos que hacen la integración:
+
+```powershell
+$dst = "$env:USERPROFILE\.claude"
+New-Item -ItemType Directory -Force "$dst\scripts","$dst\hooks" | Out-Null
+
+# el wrapper: único punto de delegación a Codex
+Copy-Item ".\Orquestador\scripts\codex-run.ps1" "$dst\scripts\" -Force
+
+# el guard de git del lado Claude (mismo script que usa Codex)
+Copy-Item ".\Orquestador\hooks\git-guard.ps1"   "$dst\hooks\"   -Force
+```
+
+Y mergeá `Orquestador\settings-snippet.json` en `~/.claude/settings.json`.
+**Fusionar, no reemplazar**: `permissions.deny`, `permissions.allow` y
+`hooks.PreToolUse` se agregan a lo que ya tengas.
+
+Lo que aporta cada clave:
+
+| Clave | Para qué |
+|---|---|
+| `permissions.deny` | Bloquea las formas directas de publicar cambios |
+| `hooks.PreToolUse` → `git-guard.ps1` | Cubre además `git -C` y `--git-dir=`, que la deny rule no alcanza |
+| `permissions.allow` → `codex-run.ps1` | Evita un prompt de permiso en cada delegación |
+| `attribution` + `includeCoAuthoredBy` | Commits sin atribución de IA |
+| `model: opus` + `effortLevel: medium` | El Orquestador corre en Opus |
+| `defaultMode: bypassPermissions` | Flujo sin prompts. Las deny rules siguen vigentes igual |
+
+Reiniciá Claude Code para que tome el hook nuevo.
+
+---
+
+## 5. Verificación
+
+```powershell
+claude mcp list       # serena y context7 conectados
+codex doctor          # todo en verde
+codex plugin list     # engram@engram: installed, enabled
+engram version
+```
+
+En una sesión nueva de Claude Code:
+
+1. `/skills` → aparece `orquestador`
+2. `/agents` → `explorador`, `constructor`, `tester`
+3. `/status` → permission mode `bypassPermissions`
+4. La barra de estado muestra los % de rate limit 5h/7d **sin `?`** en las horas
+
+El puente:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.claude\scripts\codex-run.ps1" -BudgetOnly -Verbose
+```
+
+Salida esperada:
+
+```
+== Presupuesto ==
+Codex  : 80% libre (plan plus) - reset 2026-08-21 09:52
+Claude : 5h 29% usado | 7d 25% usado - reset 2026-08-21T05:40:00Z
+Decision: GO - Codex libre 80%. Delegacion normal.
+
+== Modelos (catalogo vivo) ==
+  lead    -> gpt-5.6-sol (default low)
+  worker  -> gpt-5.6-terra (default medium)
+  cheap   -> gpt-5.6-luna (default medium)
+```
+
+Si los slugs son otros, está bien: se resuelven del catálogo vivo. Lo que importa
+es que los tres tiers resuelvan a algo.
+
+---
+
+## 6. Smoke tests
+
+| # | Qué valida | Cómo | Esperado |
+|---|---|---|---|
+| 1 | Trivial no levanta Codex | pedile un rename de variable | lo hace Opus solo; sin línea en `decisions.jsonl` |
+| 2 | Lectura de cuotas | `-BudgetOnly` | ambos % y un veredicto |
+| 3 | Modelos por tier | `-BudgetOnly -Verbose` | los 3 tiers resuelven a slugs reales |
+| 4 | Guard de Codex (reglas) | ver abajo | `forbidden` / `prompt`, nunca vacío |
+| 5 | Guard de Claude (hook) | ver abajo | denegado por el hook |
+| 6 | TDD híbrido | feature mediana | Tester RED → Codex GREEN → Claude revisa |
+| 7 | Cross-review | `-Role reviewer` | findings `[P#] archivo:línea` |
+| 8 | Contexto acotado | mirá la spec enviada | solo objetivo + paths + tests, sin historial |
+| 9 | Output compacto | cualquier delegación | ≤20 líneas |
+| 10 | Reuso de sesión | implementá algo y pedí "agregá X" | mismo `SESSION_ID`, prompt corto |
+| 11 | Umbral de reuso | `-Resume` sobre sesión >1.2 MB | `REUSE-DENIED` |
+| 12 | Aislamiento de rol | reviewer tras constructor | sesión nueva, no hereda |
+| 13 | NO-GO por cuota | `-MinFreePercent 99` | sale sin invocar a Codex, exit 2 |
+| 14 | Sin autenticar | `codex logout` en una prueba | mensaje claro, exit 5, sin fallback a API key |
+
+**Test 4** — sin publicar nada:
+
+```powershell
+codex execpolicy check --rules "$env:USERPROFILE\.codex\rules\orquestador.rules" git push origin main
+codex execpolicy check --rules "$env:USERPROFILE\.codex\rules\orquestador.rules" git -C . push origin main
+```
+
+Primero → `forbidden`. Segundo → `prompt` (las `prefix_rule` solo expresan
+prefijos de argv; la cobertura total la da el hook).
+
+**Test 5** — creá un repo de prueba **sin remote configurado** y pedile a Claude
+que corra `git -C <ese-repo> push origin main`. Debe responder el guard:
+
+```
+Bloqueado por el Orquestador: publicar cambios es exclusivo del usuario.
+```
+
+Sin remote, aunque el guard fallara no habría a dónde publicar. **No pruebes esto
+en un repo real.**
+
+**Test 13**:
+
+```powershell
+powershell -File "$env:USERPROFILE\.claude\scripts\codex-run.ps1" -Role verifier `
+  -Prompt "no importa" -MinFreePercent 99
+```
+
+---
+
+## 7. Actualizar y desinstalar
+
+**Actualizar el kit**: copiá la versión nueva y repetí los pasos 2–4. Del lado
+Codex, `.\install.ps1` deja backup en `~/.codex/orquestador-backups\`.
+
+**Actualizar los CLIs**: `codex update`. Hacelo *después* de que los smoke tests
+pasen, para no cambiar la base bajo los pies.
+
+**Desinstalar el puente** (deja ambos kits intactos):
+
+```powershell
+Remove-Item "$env:USERPROFILE\.claude\scripts\codex-run.ps1"
+Remove-Item "$env:USERPROFILE\.claude\hooks\git-guard.ps1"
+```
+
+y sacá de `~/.claude/settings.json` el bloque `hooks.PreToolUse` del guard y la
+entrada `permissions.allow` del wrapper.
+
+---
+
+## 8. Problemas conocidos
+
+**El guard bloquea un comando compuesto entero.** Si cualquier parte del comando
+dispara la regla, se deniega todo. Es correcto, pero sorprende: partí el comando.
+
+**La statusline no muestra nada.** Necesita el clon en `~/.claude/statusline` y
+`statusline-wrapper.ps1` en `~/.claude`. Sin `-ExecutionPolicy Bypass`, una policy
+`Restricted` la rechaza en silencio.
+
+**Horas con `?` en la statusline.** Falta el wrapper: el script upstream usa la
+cultura del sistema y PowerShell 5.1 emite en codepage OEM.
+
+**`codex exec` falla con "input is not valid UTF-8".** Versión vieja del wrapper.
+El actual escribe bytes UTF-8 directo al stream (.NET Framework no tiene
+`StandardInputEncoding`).
+
+**"Output schema file is not valid JSON".** Ídem: `Set-Content -Encoding UTF8`
+escribe BOM en PS 5.1. El wrapper actual usa `UTF8Encoding($false)`.
+
+**Codex reporta que no puede ejecutar Python.** El sandbox puede denegar los
+intérpretes instalados desde la Microsoft Store (`WindowsApps\python.exe`). Instalá
+Python desde python.org. Codex marca `tests: NOT_RUN` en vez de inventar un GREEN.
+
+**Una corrida de Codex se cuelga hasta el timeout.** Suele ser un hook que escribe
+algo distinto del JSON del contrato en stdout. Un hook `PreToolUse` debe emitir
+**solo** su JSON.
+
+**El hook no se aplica tras editar `hooks.json`.** Cambia el hash de confianza:
+volvé a `/hooks` dentro de Codex y confiálo.

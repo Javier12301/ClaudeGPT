@@ -1,0 +1,4 @@
+interface:
+  display_name: "Constructor"
+  short_description: "Implementación multiagente con TDD real"
+  default_prompt: "Usá $constructor para implementar este cambio con TDD y verificación independiente."
