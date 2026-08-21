@@ -45,58 +45,51 @@ Qué resuelve concretamente:
 | Usar dos modelos para todo, aunque sea un typo | Routing adaptativo: lo trivial ni consulta cuotas |
 
 **No** es una plataforma distribuida, ni tiene colas, dashboard, base de datos ni
-protocolo propio. Es un script y unas reglas.
-
----
-
-## 2. Arquitectura de un vistazo
+protoc## 2. Arquitectura de un vistazo
 
 ```mermaid
 flowchart TD
-    USR([Usuario]) --> TL
+    USR([👤 Usuario]) --> TL
 
-    subgraph LEAD["CLAUDE CODE — OPUS · Tech Lead"]
-        TL["skill /orquestador<br/>única interfaz con el usuario"]
-        F05["Fase 0.5 — presupuesto y routing<br/>cuota Claude · cuota Codex · catálogo de modelos"]
+    subgraph LEAD["1. TECH LEAD — CLAUDE OPUS"]
+        TL["/orquestador<br/><i>Única interfaz con el usuario</i>"]
+        F05["Fase 0.5: Presupuesto & Routing<br/><i>Lee cuotas Claude/Codex</i>"]
         TL --> F05
     end
 
-    F05 --> DISP{Reparto<br/>del trabajo}
+    F05 --> DISP["Reparto del Trabajo"]
 
-    subgraph CL["Agentes Claude · Sonnet/Haiku"]
-        EXP["explorador<br/>read-only"]
-        TST["tester<br/>escribe RED"]
-        CON["constructor<br/>lleva a GREEN"]
+    subgraph EXEC["2. CAPA DE EJECUCIÓN"]
+        subgraph CL["Claude Agents (Sonnet)"]
+            EXP["explorador <i>(read-only)</i>"]
+            TST["tester <i>(RED TDD)</i>"]
+            CON["constructor <i>(GREEN)</i>"]
+        end
+
+        subgraph CX["Codex CLI (codex-run.ps1)"]
+            CXC["-Role constructor <i>(write)</i>"]
+            CXR["-Role reviewer / security-reviewer"]
+            CXV["-Role verifier / docs-researcher"]
+        end
     end
 
-    subgraph CX["Codex vía codex-run.ps1"]
-        CXC["-Role constructor<br/>workspace-write"]
-        CXR["-Role reviewer<br/>-Role security-reviewer<br/>read-only"]
-        CXV["-Role verifier<br/>-Role docs-researcher"]
+    DISP --> CL
+    DISP --> CX
+
+    CL --> ARB
+    CX --> ARB
+
+    subgraph FINAL["3. ARBITRAJE Y ENTREGA"]
+        ARB["Claude Arbitra & Consolida<br/><i>Lee git diff · evalúa findings · aplica fixes &lt;50 líneas</i>"]
+        OUT([📦 Entrega al Usuario])
+        ARB --> OUT
     end
 
-    DISP --> EXP
-    DISP --> TST
-    DISP --> CON
-    DISP --> CXC
-    DISP --> CXR
-    DISP --> CXV
-
-    EXP --> ARB
-    TST --> ARB
-    CON --> ARB
-    CXC --> ARB
-    CXR --> ARB
-    CXV --> ARB
-
-    ARB["Claude arbitra<br/>lee git diff · evalúa findings uno por uno<br/>aplica fixes menores a 50 líneas"]
-    ARB --> OUT([Entrega al usuario])
-
-    classDef lead fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,color:#0b1220
-    classDef claude fill:#dcfce7,stroke:#15803d,stroke-width:1.5px,color:#0b1220
-    classDef codex fill:#fef3c7,stroke:#b45309,stroke-width:1.5px,color:#0b1220
-    classDef gate fill:#ede9fe,stroke:#6d28d9,stroke-width:2px,color:#0b1220
-    classDef io fill:#f1f5f9,stroke:#475569,stroke-width:2px,color:#0b1220
+    classDef lead fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#ffffff
+    classDef claude fill:#064e3b,stroke:#10b981,stroke-width:1.5px,color:#ffffff
+    classDef codex fill:#78350f,stroke:#f59e0b,stroke-width:1.5px,color:#ffffff
+    classDef gate fill:#4c1d95,stroke:#8b5cf6,stroke-width:2px,color:#ffffff
+    classDef io fill:#334155,stroke:#94a3b8,stroke-width:2px,color:#ffffff
 
     class TL,F05,ARB lead
     class EXP,TST,CON claude
@@ -105,13 +98,11 @@ flowchart TD
     class USR,OUT io
 ```
 
-Tres invariantes que sostienen todo:
-
-1. **Un solo Tech Lead.** Cada invocación a Codex lleva `-c agents.enabled=false`,
-   así que Codex no puede abrir su propio subloop.
-2. **Un solo escritor a la vez.** Nunca el constructor de Claude y un executor de
-   Codex sobre el mismo working tree. Los reviewers read-only sí van en paralelo.
-3. **Codex nunca habla con el usuario.** Devuelve un contrato y se apaga.
+> [!IMPORTANT]
+> **Tres invariantes estructurales:**
+> 1. **Un solo Tech Lead.** Cada invocación a Codex lleva `-c agents.enabled=false`, así que Codex no puede abrir su propio subloop.
+> 2. **Un solo escritor a la vez.** Nunca el constructor de Claude y un executor de Codex sobre el mismo working tree. Los reviewers read-only sí van en paralelo.
+> 3. **Codex nunca habla con el usuario.** Devuelve un contrato estricto de salida y se apaga.
 
 ---
 
@@ -143,14 +134,11 @@ verdad, no se duplican prompts.
 | `verifier` | cheap / low | workspace-write | build, lint, typecheck, suites largas |
 | `docs-researcher` | cheap | read-only | Segunda opinión documental, versiones, deprecaciones |
 
-**Roles deliberadamente no usados en el flujo híbrido:**
-
-- `explorador` y `tester-tdd` de Codex — Claude ya los cubre, y su explorador
-  tiene Serena (búsqueda semántica vía language server), que es mejor herramienta.
-- `e2e-browser` y `browser-diagnostics` — solo bajo pedido explícito.
-- Las skills `$constructor` y `$revisor-completo` son **orquestadores completos**.
-  Se reservan para delegación total (rutas G y H), cuando Claude no participa.
-  Usarlas cuando Claude ya hizo spec + exploración + RED duplicaría el razonamiento.
+> [!NOTE]
+> **Roles deliberadamente no usados en el flujo híbrido:**
+> - `explorador` y `tester-tdd` de Codex — Claude ya los cubre con Serena (búsqueda semántica vía LSP).
+> - `e2e-browser` y `browser-diagnostics` — solo bajo pedido explícito.
+> - Las skills `$constructor` y `$revisor-completo` son **orquestadores completos**. Se reservan para delegación total (rutas G y H) cuando Claude no participa.
 
 ---
 
@@ -158,91 +146,105 @@ verdad, no se duplican prompts.
 
 ### 4.0 El árbol de decisión completo
 
-Este es el razonamiento que corre el Orquestador **antes** de tocar nada. Notá
-que la mayoría de los caminos terminan sin levantar Codex: esa es la intención.
+Este es el razonamiento que corre el Orquestador **antes** de tocar nada. Notá que la mayoría de los caminos terminan sin levantar Codex: esa es la intención.
+
+#### 4.0a Macro-Flujo y Presupuesto (Gate System)
 
 ```mermaid
 flowchart TD
-    REQ([Pedido del usuario]) --> OVR{¿Hay override<br/>explícito?}
+    REQ([📥 Pedido del Usuario]) --> OVR["¿Hay Override Explícito?"]
 
-    OVR -->|"solo con Claude"| RA
-    OVR -->|"que Codex implemente"| RC
-    OVR -->|"que Codex revise"| RBP
-    OVR -->|"usá también Codex"| FORCE["Al menos una delegación<br/>con utilidad real"]
-    OVR -->|"nada: decido yo"| TRIV
+    subgraph PHASE1["1. Filtro Inicial & Overrides"]
+        OVR -->|Override Directo| PROC["Aplicar Regla del Usuario"]
+        OVR -->|Sin Override| TRIV["¿Es Trivial?<br/><i>typo / rename / &lt;10 líneas</i>"]
+        TRIV -->|Sí| CASO_A["<b>Caso A — Trivial</b><br/>Opus resuelve solo<br/><i>Sin agentes, sin cuotas</i>"]
+        TRIV -->|No| MEM["mem_search de la zona"]
+    end
 
-    FORCE --> TRIV
+    MEM --> BUD["codex-run.ps1 -BudgetOnly"]
 
-    TRIV{"¿Es trivial?<br/>typo · rename · pocas líneas<br/>explicación"}
-    TRIV -->|Sí| RA["<b>Caso A</b><br/>Opus lo resuelve solo<br/>sin agentes, sin cuotas"]
-    TRIV -->|No| MEM["mem_search del área<br/>¿ya hay contexto?"]
+    subgraph PHASE2["2. Presupuesto & Gate de Codex"]
+        BUD --> GATE{"Cuota Libre<br/>de Codex"}
+        GATE -->|"< 10% o Limit"| NOGO["<b>NO-GO Codex</b><br/>Solo Claude"]
+        GATE -->|"10% a 20%"| WARN["<b>WARN</b><br/>Solo si user lo pidió"]
+        GATE -->|"20% a 40%"| PART["<b>GO Acotado</b><br/>Review / Verify / Docs"]
+        GATE -->|"> 40%"| FULL["<b>GO Normal</b><br/>Delegación Estándar"]
 
-    MEM --> BUD["codex-run.ps1 -BudgetOnly<br/>lee ambas cuotas"]
-    BUD --> GATE{"Cuota libre<br/>de Codex"}
+        NOGO --> CLQ{"¿Claude tiene<br/>margen 5h?"}
+        CLQ -->|Sí| CASO_B["<b>Caso B — Normal</b><br/>Pipeline Claude"]
+        CLQ -->|No| WAIT["<b>Esperar Reset</b><br/>Informar al usuario"]
 
-    GATE -->|"menor a 10%<br/>o spendControlReached"| NOGO["<b>NO-GO</b><br/>Codex descartado"]
-    GATE -->|"10 a 20%"| WARN{"¿El usuario<br/>lo pidió?"}
-    GATE -->|"20 a 40%"| PART["GO acotado<br/>review · verify · docs<br/>NO implementación grande"]
-    GATE -->|"mayor a 40%"| FULL["GO<br/>delegación normal"]
+        FULL --> CLP{"¿Claude 5h<br/>> 85%?"}
+        CLP -->|Sí| CASO_G["<b>Caso G — Total</b><br/>$constructor Codex"]
+        CLP -->|No| NAT_EVAL["Evaluar Naturaleza<br/>de la Tarea"]
+    end
 
-    WARN -->|No| NOGO
-    WARN -->|Sí| PART
+    WARN --> NAT_EVAL
+    PART --> NAT_EVAL
 
-    NOGO --> CLQ{"¿Claude tiene<br/>margen?"}
-    CLQ -->|Sí| RB
-    CLQ -->|No| WAIT["Informar y proponer<br/>esperar el reset<br/>no arrancar nada"]
+    NAT_EVAL --> ROUTE["<b>Routing a Casos A–H</b><br/><i>ver Matriz abajo</i>"]
 
-    FULL --> CLP{"¿Claude 5h<br/>mayor a 85%?"}
-    CLP -->|Sí| RG["<b>Caso G</b><br/>delegación total<br/>$constructor de Codex"]
-    CLP -->|No| NAT
+    classDef io fill:#334155,stroke:#94a3b8,stroke-width:2px,color:#ffffff
+    classDef gate fill:#4c1d95,stroke:#8b5cf6,stroke-width:2px,color:#ffffff
+    classDef soloClaude fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#ffffff
+    classDef conCodex fill:#78350f,stroke:#f59e0b,stroke-width:2px,color:#ffffff
+    classDef stop fill:#881337,stroke:#f43f5e,stroke-width:2px,color:#ffffff
+    classDef step fill:#1e293b,stroke:#38bdf8,stroke-width:1.5px,color:#ffffff
 
-    PART --> NAT
-
-    NAT{"Naturaleza<br/>de la tarea"}
-    NAT -->|"toca auth, pagos,<br/>permisos, uploads, tokens"| RD["<b>Caso D</b><br/>pipeline Claude<br/>+ security-reviewer"]
-    NAT -->|"mucho código nuevo<br/>muchos archivos"| RC["<b>Caso C</b><br/>Claude explora + RED<br/>Codex implementa"]
-    NAT -->|"build, lint, typecheck<br/>suite larga"| RE["<b>Caso E</b><br/>verifier"]
-    NAT -->|"comparar libs<br/>versiones, deprecaciones"| RF["<b>Caso F</b><br/>docs-researcher"]
-    NAT -->|"revisar todo<br/>el proyecto"| RH["<b>Caso H</b><br/>$revisor-completo"]
-    NAT -->|"toca contratos<br/>concurrencia, datos"| RBP["<b>Caso B+</b><br/>pipeline Claude<br/>+ reviewer"]
-    NAT -->|"feature acotada<br/>bug con causa clara"| RB["<b>Caso B</b><br/>pipeline Claude<br/>sin Codex"]
-
-    RA --> DONE
-    RB --> DONE
-    WAIT --> DONE
-    RBP --> DONE
-    RC --> DONE
-    RD --> DONE
-    RE --> DONE
-    RF --> DONE
-    RG --> DONE
-    RH --> DONE
-
-    DONE([Plan declarado al usuario:<br/>qué modelo hace qué y por qué])
-
-    classDef soloClaude fill:#dcfce7,stroke:#15803d,stroke-width:2px,color:#0b1220
-    classDef conCodex fill:#fef3c7,stroke:#b45309,stroke-width:2px,color:#0b1220
-    classDef gate fill:#ede9fe,stroke:#6d28d9,stroke-width:2px,color:#0b1220
-    classDef stop fill:#fee2e2,stroke:#b91c1c,stroke-width:2px,color:#0b1220
-    classDef io fill:#f1f5f9,stroke:#475569,stroke-width:2px,color:#0b1220
-    classDef step fill:#dbeafe,stroke:#1d4ed8,stroke-width:1.5px,color:#0b1220
-
-    class RA,RB soloClaude
-    class RBP,RC,RD,RE,RF,RG,RH,PART,FULL,FORCE conCodex
-    class OVR,TRIV,GATE,WARN,CLQ,CLP,NAT gate
+    class REQ,ROUTE io
+    class OVR,TRIV,GATE,CLQ,CLP gate
+    class CASO_A,CASO_B soloClaude
+    class PART,FULL,CASO_G conCodex
     class NOGO,WAIT stop
-    class REQ,DONE io
-    class MEM,BUD step
+    class PROC,MEM,BUD,NAT_EVAL step
 ```
 
-Tres cosas que vale la pena leer del diagrama:
+#### 4.0b Matriz de Routing por Naturaleza de la Tarea
 
-- **El override del usuario corta primero.** Si decís "solo con Claude", ni
-  siquiera se consulta la cuota.
-- **Lo trivial sale por izquierda enseguida.** Un rename no pasa por el gate de
-  presupuesto ni levanta un solo agente.
-- **NO-GO no es un error.** Es una rama válida: Codex se descarta, Claude sigue,
-  y solo si Claude *tampoco* tiene margen se propone esperar el reset.
+```mermaid
+flowchart LR
+    subgraph TAREA["Naturaleza de la Tarea"]
+        T_NORM["Feature acotada / Bug simple"]
+        T_QUAL["Contratos / Concurrencia / Datos"]
+        T_VOL["Mucho código nuevo / Varios archivos"]
+        T_AUTH["Auth / Permisos / Tokens / Pagos"]
+        T_TEST["Suite larga / Build / Typecheck"]
+        T_DOCS["Comparar libs / Deprecaciones"]
+        T_AUDIT["Auditoría completa del repo"]
+    end
+
+    subgraph PIPELINE["Pipeline Asignado"]
+        RB["<b>Caso B — Normal</b><br/>Pipeline Claude sin Codex"]
+        RBP["<b>Caso B+ — Con Riesgo</b><br/>Claude + Codex reviewer"]
+        RC["<b>Caso C — Voluminoso</b><br/>Claude RED ➔ Codex GREEN"]
+        RD["<b>Caso D — Seguridad</b><br/>Claude + security-reviewer"]
+        RE["<b>Caso E — Verificación</b><br/>Codex verifier"]
+        RF["<b>Caso F — Investigación</b><br/>Codex docs-researcher"]
+        RH["<b>Caso H — Auditoría</b><br/>$revisor-completo Codex"]
+    end
+
+    T_NORM --> RB
+    T_QUAL --> RBP
+    T_VOL --> RC
+    T_AUTH --> RD
+    T_TEST --> RE
+    T_DOCS --> RF
+    T_AUDIT --> RH
+
+    classDef tbox fill:#1e293b,stroke:#64748b,stroke-width:1.5px,color:#ffffff
+    classDef cbox fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#ffffff
+    classDef secbox fill:#451a03,stroke:#fbbf24,stroke-width:2px,color:#ffffff
+
+    class T_NORM,T_QUAL,T_VOL,T_AUTH,T_TEST,T_DOCS,T_AUDIT tbox
+    class RC,RD,RBP,RE,RF,RH secbox
+    class RB cbox
+```
+
+> [!TIP]
+> **Puntos clave del árbol de decisión:**
+> - **El override del usuario corta primero:** Si decís *"solo con Claude"*, ni siquiera se consulta la cuota.
+> - **Lo trivial sale por izquierda enseguida:** Un rename no pasa por el gate de presupuesto ni levanta un solo agente.
+> - **NO-GO no es un error:** Es una rama válida: Codex se descarta, Claude sigue, y solo si Claude *tampoco* tiene margen se propone esperar el reset.
 
 ### 4.1 Los casos A–H
 
@@ -403,43 +405,47 @@ re-explicar todo.
 **Se arranca de cero** si es otra tarea, cambió el contrato, cambia el rol,
 cambia el sandbox, o el working tree cambió por fuera de Codex.
 
-> **Un reviewer nunca hereda la sesión del constructor.** Si el que revisa es el
-> mismo que escribió, se pierde la independencia del review — que es medio motivo
-> de usar Codex.
+> [!WARNING]
+> **Un reviewer nunca hereda la sesión del constructor.** Si el que revisa es el mismo que escribió, se pierde la independencia del review — que es medio motivo de usar Codex.
 
 ```mermaid
 flowchart TD
-    NEED([Hace falta más trabajo<br/>de Codex]) --> ROLE{"¿Mismo rol que<br/>la sesión anterior?"}
+    NEED([⚡ Requerimiento de más trabajo en Codex]) --> ROLE["¿Mismo rol que sesión previa?"]
 
-    ROLE -->|"No: constructor → reviewer"| NEWR["<b>Sesión nueva</b><br/>el reviewer no puede heredar<br/>el contexto de quien escribió"]
-    ROLE -->|Sí| CONT{"¿Continuidad real?<br/>misma tarea, mismos archivos,<br/>misma spec"}
+    subgraph S1["1. Filtros de Seguridad y Aislamiento"]
+        ROLE -->|No| NEWR["<b>Sesión Nueva</b><br/><i>Reviewer jamás hereda de constructor</i>"]
+        ROLE -->|Sí| CONT["¿Misma tarea, archivos y spec?"]
+        CONT -->|No| NEWT["<b>Sesión Nueva</b><br/><i>Spec fresca requerida</i>"]
+        CONT -->|Sí| SANE["¿Corrida previa exit 0 y blocked=false?"]
+        SANE -->|No| NEWB["<b>Sesión Nueva</b><br/><i>Contexto previo inestable</i>"]
+    end
 
-    CONT -->|"No: otra tarea<br/>o cambió el contrato"| NEWT["<b>Sesión nueva</b><br/>spec fresca"]
-    CONT -->|Sí| SANE{"¿La corrida anterior<br/>terminó sana?<br/>exit 0 y blocked false"}
+    SANE -->|Sí| SIZE{"Tamaño del Rollout<br/><i>(-SessionInfo)</i>"}
 
-    SANE -->|"No: cortada por cuota,<br/>sandbox o se fue por las ramas"| NEWB["<b>Sesión nueva</b><br/>ese contexto ya es ruido"]
-    SANE -->|Sí| SIZE{"Tamaño del rollout<br/>-SessionInfo"}
+    subgraph S2["2. Límites de Tamaño"]
+        SIZE -->|"< 400 KB"| OK["<b>REUSE-OK</b><br/>Reusar sin dudar"]
+        SIZE -->|"400 KB – 1.2 MB"| DIRECT{"¿Continuación directa<br/>del turno anterior?"}
+        SIZE -->|"> 1.2 MB"| DENIED["<b>REUSE-DENIED</b><br/>Rechazado por el wrapper"]
 
-    SIZE -->|"menor a 400 KB"| OK["<b>REUSE-OK</b><br/>reusar sin dudar"]
-    SIZE -->|"400 KB a 1.2 MB"| DIRECT{"¿Es continuación<br/>directa del turno<br/>anterior?"}
-    SIZE -->|"mayor a 1.2 MB"| DENIED["<b>REUSE-DENIED</b><br/>el wrapper lo rechaza"]
+        DIRECT -->|Sí| OK
+        DIRECT -->|No| DENIED
+    end
 
-    DIRECT -->|Sí| OK
-    DIRECT -->|No| DENIED
+    subgraph S3["3. Veredicto Final"]
+        OK --> RUN["codex-run.ps1 -Resume ID<br/><i>Prompt solo con el delta</i>"]
+        DENIED --> NEWS["Sesión Nueva<br/><i>Spec acotada</i>"]
+        NEWR --> NEWS
+        NEWT --> NEWS
+        NEWB --> NEWS
 
-    OK --> RUN["codex-run.ps1 -Resume id<br/>-Prompt 'solo el delta'"]
-    DENIED --> NEWS["Sesión nueva con<br/>spec acotada"]
-    NEWR --> NEWS
-    NEWT --> NEWS
-    NEWB --> NEWS
+        RUN --> TELL([📢 Notificar decisión al usuario])
+        NEWS --> TELL
+    end
 
-    RUN --> TELL([Avisar al usuario<br/>qué se reusó y por qué])
-    NEWS --> TELL
-
-    classDef reuse fill:#dcfce7,stroke:#15803d,stroke-width:2px,color:#0b1220
-    classDef fresh fill:#fef3c7,stroke:#b45309,stroke-width:2px,color:#0b1220
-    classDef gate fill:#ede9fe,stroke:#6d28d9,stroke-width:2px,color:#0b1220
-    classDef io fill:#f1f5f9,stroke:#475569,stroke-width:2px,color:#0b1220
+    classDef reuse fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#ffffff
+    classDef fresh fill:#78350f,stroke:#f59e0b,stroke-width:2px,color:#ffffff
+    classDef gate fill:#4c1d95,stroke:#8b5cf6,stroke-width:2px,color:#ffffff
+    classDef io fill:#334155,stroke:#94a3b8,stroke-width:2px,color:#ffffff
 
     class OK,RUN reuse
     class NEWR,NEWT,NEWB,DENIED,NEWS fresh
@@ -495,12 +501,12 @@ Así se ve el caso C completo, con los dos puntos donde el ciclo puede volver at
 ```mermaid
 sequenceDiagram
     autonumber
-    actor U as Usuario
-    participant O as Orquestador<br/>(Opus)
-    participant T as tester<br/>(Sonnet)
-    participant X as Codex<br/>constructor
-    participant V as Codex<br/>verifier
-    participant R as Codex<br/>reviewer
+    actor U as 👤 Usuario
+    participant O as 🧠 Orquestador<br/>(Opus)
+    participant T as 🧪 tester<br/>(Sonnet)
+    participant X as 🛠️ Codex<br/>constructor
+    participant V as ⚡ Codex<br/>verifier
+    participant R as 🔍 Codex<br/>reviewer
 
     U->>O: "Implementá X"
     O->>O: mem_search · presupuesto · routing

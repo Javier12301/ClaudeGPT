@@ -62,6 +62,12 @@ correspondiente del [README.md](README.md) en el mismo diff.
 
 ### Changed
 
+- **Rediseño modular y visual de diagramas Mermaid en `README.md`**:
+  - Reestructuración de diagramas monolíticos en subgrafos (`subgraph`) por capas jerárquicas (Tech Lead, Ejecución, Arbitraje) para evitar sobrecarga y desproporción visual en GitHub.
+  - División del árbol de decisión (Sección 4.0) en un Macro-Flujo de Presupuesto/Gate (4.0a) y una Matriz de Routing por Naturaleza de la Tarea (4.0b) en disposición `flowchart LR`.
+  - Optimización de nodos, reemplazando rombos de texto largo por cajas redondeadas compactas con etiquetas concisas en las flechas (`|Sí|`, `|No|`, `|>40%|`).
+  - Paleta de colores personalizada mediante `classDef` con alto contraste y legibilidad garantizada tanto en GitHub Dark Mode como Light Mode.
+  - Incorporación de avisos nativos de GitHub Alerts (`> [!IMPORTANT]`, `> [!NOTE]`, `> [!TIP]`, `> [!WARNING]`) para destacar invariantes y reglas del orquestador.
 - **`AGENTS.md` de Codex** distingue ahora dos modos: sesión interactiva propia
   (Codex es Tech Lead) y sesión iniciada por Claude vía `codex exec` (Codex es
   executor, no crea subagentes, devuelve solo el contrato pedido). Toda
