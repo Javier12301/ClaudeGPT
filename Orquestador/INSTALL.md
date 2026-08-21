@@ -120,28 +120,42 @@ testing. Los agentes no inventan credenciales.
 
 ---
 
-## 3. Copiar skill y agents
+## 3. Copiar skills y agents
+
+El kit tiene **tres skills**: `orquestador` (la que invocás vos) más
+`brainstorming` y `documentacion`, que solo invoca el orquestador. Las tres tienen
+que estar instaladas.
 
 Desde la carpeta de este kit:
 
 ```powershell
 $dst = "$env:USERPROFILE\.claude"
-New-Item -ItemType Directory -Force "$dst\skills\orquestador" | Out-Null
+New-Item -ItemType Directory -Force "$dst\skills" | Out-Null
 New-Item -ItemType Directory -Force "$dst\agents" | Out-Null
-Copy-Item ".\skills\orquestador\SKILL.md" "$dst\skills\orquestador\" -Force
-Copy-Item ".\agents\*.md"                 "$dst\agents\"           -Force
+Copy-Item ".\skills\*"      "$dst\skills\" -Recurse -Force
+Copy-Item ".\agents\*.md"   "$dst\agents\" -Force
 ```
 
 POSIX:
 
 ```bash
-mkdir -p ~/.claude/skills/orquestador ~/.claude/agents
-cp skills/orquestador/SKILL.md ~/.claude/skills/orquestador/
+mkdir -p ~/.claude/skills ~/.claude/agents
+cp -R skills/. ~/.claude/skills/
 cp agents/*.md ~/.claude/agents/
 ```
 
 Claude Code detecta los archivos nuevos sin reiniciar, salvo que la carpeta
 `skills/` o `agents/` no existiera al arrancar la sesión — en ese caso, reiniciá.
+
+> [!NOTE]
+> **¿Actualizando desde una versión anterior?** Los mismos dos comandos alcanzan:
+> copian el árbol completo de `skills/`, así que traen `brainstorming` y
+> `documentacion` además de `orquestador`. Reiniciá la sesión después, porque las
+> carpetas de skill nuevas no siempre se detectan en caliente.
+>
+> Si tenés también el kit Codex, nada del lado Codex cambió con esta versión: el
+> detalle completo está en
+> [`INSTALL-HIBRIDO.md` § 7.1](../INSTALL-HIBRIDO.md#71-actualizar-desde-una-versión-anterior-a-las-skills-de-documentación).
 
 ---
 
@@ -287,10 +301,4 @@ En una sesión nueva:
 
 ## Decisiones deliberadas
 
-- **No hay cuarto agente `reviewer`**: el Orquestador-Opus ya es el revisor final.
-  Se evalúa solo si aparece un dolor concreto (ej. revisión de seguridad que
-  exija un segundo par de ojos independiente del que construyó).
-- **No hay SDD completo** (documento de diseño + aprobación sección por sección):
-  demasiado verboso. En su lugar, brainstorming ligero de 2–3 preguntas.
-- **Nunca Opus para subagentes.** Si hace falta Opus para algo puntual, lo hace el
-  propio Orquestador.
+Ver [`docs/DECISIONS.md`](../docs/DECISIONS.md).

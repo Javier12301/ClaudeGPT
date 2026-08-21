@@ -41,17 +41,22 @@ powershell -NoProfile -ExecutionPolicy Bypass -File ~/.claude/scripts/codex-run.
 Devuelve el % libre de Codex, el % usado de Claude (5h y 7d) y un veredicto
 `GO` / `WARN` / `NO-GO`. Con eso elegís ruta:
 
-| Caso | Cuándo | Quién ejecuta |
-|---|---|---|
-| **A — trivial** | typo, rename, fix de pocas líneas, explicación | Vos solo. Sin agentes, sin Codex |
-| **B — desarrollo normal** | feature acotada, bug con causa clara | Pipeline Claude (explorador → tester → constructor) |
-| **B+ — normal con riesgo** | toca contratos, concurrencia, datos compartidos | Pipeline Claude + `-Role reviewer` |
-| **C — implementación voluminosa** | muchos archivos, mucho código nuevo | Claude explora + tester RED → `-Role constructor` |
-| **D — seguridad** | auth, permisos, pagos, uploads, tokens, datos sensibles | Pipeline Claude + `-Role security-reviewer` |
-| **E — verificación cara** | build/lint/typecheck/suite larga | `-Role verifier` |
-| **F — investigación documental extensa** | comparar libs, migración de versión | `-Role docs-researcher` |
-| **G — delegación total** | Claude sin presupuesto y tarea autocontenida | `$constructor` de Codex (maneja su propio subloop) |
-| **H — auditoría completa** | "revisá todo el proyecto" | `$revisor-completo` de Codex |
+| Caso | Cuándo | Quién ejecuta | Doc impact |
+|---|---|---|---|
+| **A — trivial** | typo, rename, fix de pocas líneas, explicación | Vos solo. Sin agentes, sin Codex | **Nunca** |
+| **B — desarrollo normal** | feature acotada, bug con causa clara | Pipeline Claude (explorador → tester → constructor) | Probable |
+| **B+ — normal con riesgo** | toca contratos, concurrencia, datos compartidos | Pipeline Claude + `-Role reviewer` | Probable |
+| **C — implementación voluminosa** | muchos archivos, mucho código nuevo | Claude explora + tester RED → `-Role constructor` | Casi seguro |
+| **D — seguridad** | auth, permisos, pagos, uploads, tokens, datos sensibles | Pipeline Claude + `-Role security-reviewer` | Casi seguro |
+| **E — verificación cara** | build/lint/typecheck/suite larga | `-Role verifier` | No |
+| **F — investigación documental extensa** | comparar libs, migración de versión | `-Role docs-researcher` | Solo si decide algo |
+| **G — delegación total** | Claude sin presupuesto y tarea autocontenida | `$constructor` de Codex (maneja su propio subloop) | Casi seguro |
+| **H — auditoría completa** | "revisá todo el proyecto" | `$revisor-completo` de Codex | Según hallazgos |
+
+La columna **Doc impact** es una expectativa, no una orden: lo que se actualiza de
+verdad lo decide la matriz de la Fase 6. Pero el caso A no tiene impacto documental
+**nunca** — sin excepciones. La excepción se convierte en la regla en dos semanas y
+ahí perdés la ruta barata.
 
 Reglas de presupuesto:
 
@@ -67,16 +72,39 @@ Reglas de presupuesto:
 En el plan al usuario **declará siempre** qué modelo usa cada paso y por qué se
 usa (o no) Codex. El usuario tiene que poder decir "procedé" y nada más.
 
-## Fase 1 — brainstorming ligero
+## Fase 0.6 — terreno documental
 
-Si la tarea es ambigua o falta una decisión con impacto real (alcance, approach
-técnico, qué se rompe según cómo se haga): **máximo 2–3 preguntas** vía
-`AskUserQuestion`, cada una con la opción recomendada primero.
+**Solo si la tarea no es trivial.** El caso A saltea esta fase entera.
 
-Si la tarea ya viene clara y acotada: **cero preguntas**, seguí de largo.
+Averiguá qué documentación existe y de quién es, con la escalera barata de la
+skill `documentacion` (`CLAUDE.md`/`AGENTS.md` → memorias de Serena → nombres en
+`docs/` → antigüedad del último commit de `docs/`).
 
-Nunca generes un documento de diseño separado ni pidas aprobación sección por
-sección. Las preguntas van en el chat, se resuelven, y se sigue.
+Si hay documentación **nuestra**: leé README y ROADMAP completos, y de `SYSTEM.md`
+**solo el índice** — después `grep` de la sección que toca la tarea. Nunca SYSTEM
+entero: un SYSTEM que se lee completo cada sesión te cuesta tokens en vez de
+ahorrártelos.
+
+Si la documentación es **ajena, vieja, o no existe**, invocá `documentacion`: ahí
+están las siete salvaguardas. Las dos que más importan — no crear un segundo árbol
+de documentación al lado del de ellos, y no generar nada sin aprobación explícita
+del usuario.
+
+La ausencia de documentación **nunca bloquea**: sin docs, seguís con `explorador` +
+Engram como siempre.
+
+## Fase 1 — brainstorming
+
+Si la tarea ya viene clara y acotada: **cero preguntas**, seguí de largo. Preguntar
+por ritual es la forma más rápida de que el usuario deje de leer tus preguntas.
+
+Invocá la skill `brainstorming` cuando falte una decisión con impacto real: alcance
+ambiguo, dos caminos técnicos con consecuencias distintas, un bug sin causa raíz
+identificada, o un proyecto nuevo. Ahí están las reglas de preguntas, el Goal
+Contract, el Research Gate, el Bug Flow y la salida a Plan Mode.
+
+Para una duda suelta que no justifica levantar la skill: **máximo 2–3 preguntas**
+vía `AskUserQuestion`, la recomendada primero, y seguís.
 
 ## Fase 2 — exploración
 
@@ -142,6 +170,44 @@ aceptarlo.
 
 Relanzá a `constructor` desde cero solo si el error es tan grande que reintentar
 sale más barato que parchear.
+
+## Fase 6 — sincronización de documentación
+
+**Después de GREEN y del review, nunca en paralelo con un executor.** Un solo
+escritor sobre el working tree también vale para los documentos.
+
+Mirá `git diff --name-only` y decidí con esta matriz:
+
+| Cambio | Documentos |
+|---|---|
+| Typo, formato, comentario, refactor interno | ninguno |
+| Feature visible por el usuario | CHANGELOG |
+| Nueva regla de negocio | SYSTEM + CHANGELOG |
+| Nueva decisión técnica o cambio arquitectónico | SYSTEM + DECISIONS |
+| Fase terminada o nueva | ROADMAP |
+| Setup / onboarding | README |
+| Deploy o infraestructura | SYSTEM |
+| Funcionalidad eliminada | SYSTEM + ROADMAP + CHANGELOG |
+
+**La mayoría de las tareas sale con "ninguno".** Si estás tocando documentos en el
+80% de las tareas, el gate dejó de ser honesto y el sistema pasó a costar más de lo
+que ahorra.
+
+Cuando hay impacto, invocá `documentacion` y **escribí vos**. Los tres invariantes
+(presente sin verbos de cambio, reemplazar en vez de agregar, sin secciones vacías)
+son criterio, y delegar criterio a Sonnet sale caro en revisión. Se delega a
+`constructor` solo el bootstrap inicial y las reescrituras grandes.
+
+**Codex nunca redacta documentación canónica.** Puede investigar
+(`-Role docs-researcher`), no escribir.
+
+### Definition of Done
+
+Escala con la ruta. Una tarea no trivial termina cuando hay implementación, tests,
+verificación, review si correspondía, **doc sync si hubo impacto**, Engram si quedó
+conocimiento reutilizable, y ROADMAP actualizado si cambió el estado de una fase.
+
+El caso A termina cuando funciona.
 
 ---
 
@@ -276,12 +342,6 @@ implementación anterior (312 KB, liviana) en vez de arrancar una nueva"*.
 | Codex modificó tests | Rechazás el resultado, `git checkout` de esos archivos, lo reportás |
 | Tests siguen RED | Decidís: corregir spec / reintentar / volver al Tester / resolver contradicción |
 | Claude y Codex discrepan | **Vos arbitrás con evidencia.** Nunca por mayoría de modelos |
-
-## Documentación viva
-
-Todo cambio en el comportamiento del orquestador (nuevo rol, nuevo umbral, nueva
-regla de routing, nuevo fallback) actualiza `README.md` y `CHANGELOG.md` del kit
-**en el mismo diff**. Si no está documentado, no está terminado.
 
 ---
 

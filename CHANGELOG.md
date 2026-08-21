@@ -3,11 +3,49 @@
 Formato [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
 Toda feature nueva del orquestador entra acá y actualiza la sección
-correspondiente del [README.md](README.md) en el mismo diff.
+correspondiente de [`docs/SYSTEM.md`](docs/SYSTEM.md) en el mismo diff.
 
 ## [Unreleased]
 
 ### Added
+
+- **Skill `brainstorming`.** Fase de reducción de incertidumbre antes de
+  planificar: reglas de preguntas acotadas, Goal Contract como criterio de salida,
+  gate de investigación, evaluación de alternativas y diagnóstico de bugs con
+  causa raíz antes de tocar producción. Termina llamando a `EnterPlanMode`, así
+  que el harness bloquea la escritura hasta que apruebes el plan. Solo se carga
+  cuando el orquestador la invoca: una tarea trivial no la paga.
+
+- **Skill `documentacion`.** Define los documentos canónicos y, sobre todo, los
+  tres invariantes que mantienen la documentación utilizable: `SYSTEM.md` se
+  escribe en presente sin verbos de cambio, el doc sync reemplaza en vez de
+  agregar, y no existen secciones vacías. Incluye el reconocimiento del terreno
+  documental para repos ajenos, con siete salvaguardas — entre ellas, no crear un
+  segundo árbol de documentación al lado del que ya tiene el proyecto, y no
+  generar documentación sin aprobación explícita.
+
+- **Fase 0.6 y Fase 6 en la skill `orquestador`.** La 0.6 lee la documentación
+  existente por índice, nunca entera. La 6 sincroniza documentación después de
+  GREEN y del review, con una matriz de impacto donde la mayoría de las tareas
+  sale sin tocar nada. El caso A no tiene impacto documental nunca.
+
+- **Trazabilidad de reglas de negocio.** Las reglas llevan `BR-00X`, con su
+  ubicación en código y el test que las cubre. Un `grep` señala las reglas
+  declaradas que nadie verifica. Las siete reglas del propio kit quedan
+  registradas como no verificadas, que es el estado real.
+
+- **Guía de actualización desde una versión anterior**
+  ([`INSTALL-HIBRIDO.md` § 7.1](INSTALL-HIBRIDO.md)): qué cambia del lado Claude,
+  qué no se toca del puente ni del kit Codex, cómo verificarlo y cómo volver
+  atrás. El comando de copia de la versión anterior traía un solo archivo de
+  skill, así que hay que usar el nuevo.
+
+- **Bootstrap documental.** `README.md` se parte en `docs/SYSTEM.md` (estado
+  actual del sistema), `docs/DECISIONS.md` (rationale de las decisiones de
+  diseño) y `docs/ROADMAP.md` (qué falta y en qué estado). `README.md` queda
+  como puerta de entrada corta, con índice a los cuatro documentos. La sección
+  "Decisiones deliberadas" de `Orquestador/INSTALL.md` se muda a
+  `docs/DECISIONS.md`.
 
 - **Integración híbrida Claude Code + Codex** vía `codex exec`. Claude Opus queda
   como único Tech Lead e interfaz con el usuario; Codex pasa a ser capacidad

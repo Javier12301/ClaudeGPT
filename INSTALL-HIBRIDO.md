@@ -16,7 +16,11 @@ Tiempo estimado: 20–30 min, casi todo esperando descargas.
 5. [Verificación](#5-verificación)
 6. [Smoke tests](#6-smoke-tests)
 7. [Actualizar y desinstalar](#7-actualizar-y-desinstalar)
+   · [7.1. Actualizar desde una versión anterior](#71-actualizar-desde-una-versión-anterior-a-las-skills-de-documentación)
 8. [Problemas conocidos](#8-problemas-conocidos)
+
+> ¿Ya tenías el kit instalado y solo querés la versión nueva? Andá directo
+> a [7.1](#71-actualizar-desde-una-versión-anterior-a-las-skills-de-documentación).
 
 ---
 
@@ -59,13 +63,14 @@ uv tool install -p 3.13 serena-agent
 claude mcp add --scope user serena -- serena start-mcp-server --context claude-code --project-from-cwd
 ```
 
-Skill, agentes y statusline:
+Skills, agentes y statusline. Son **tres** skills: `orquestador` (la que invocás
+vos) más `brainstorming` y `documentacion`, que solo invoca el orquestador.
 
 ```powershell
 $dst = "$env:USERPROFILE\.claude"
-New-Item -ItemType Directory -Force "$dst\skills\orquestador","$dst\agents" | Out-Null
-Copy-Item ".\Orquestador\skills\orquestador\SKILL.md" "$dst\skills\orquestador\" -Force
-Copy-Item ".\Orquestador\agents\*.md"                 "$dst\agents\"           -Force
+New-Item -ItemType Directory -Force "$dst\skills","$dst\agents" | Out-Null
+Copy-Item ".\Orquestador\skills\*"    "$dst\skills\" -Recurse -Force
+Copy-Item ".\Orquestador\agents\*.md" "$dst\agents\" -Force
 
 git clone https://github.com/daniel3303/ClaudeCodeStatusLine "$dst\statusline"
 Copy-Item ".\Orquestador\statusline-wrapper.ps1" "$dst\" -Force
@@ -154,22 +159,11 @@ El puente:
 powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.claude\scripts\codex-run.ps1" -BudgetOnly -Verbose
 ```
 
-Salida esperada:
+Salida esperada: ejemplo y umbrales de presupuesto en
+[`docs/SYSTEM.md` § 2 Reglas de negocio](docs/SYSTEM.md#2-reglas-de-negocio).
 
-```
-== Presupuesto ==
-Codex  : 80% libre (plan plus) - reset 2026-08-21 09:52
-Claude : 5h 29% usado | 7d 25% usado - reset 2026-08-21T05:40:00Z
-Decision: GO - Codex libre 80%. Delegacion normal.
-
-== Modelos (catalogo vivo) ==
-  lead    -> gpt-5.6-sol (default low)
-  worker  -> gpt-5.6-terra (default medium)
-  cheap   -> gpt-5.6-luna (default medium)
-```
-
-Si los slugs son otros, está bien: se resuelven del catálogo vivo. Lo que importa
-es que los tres tiers resuelvan a algo.
+Si los slugs de modelo son otros, está bien: se resuelven del catálogo vivo. Lo
+que importa es que los tres tiers resuelvan a algo.
 
 ---
 
@@ -228,6 +222,84 @@ Codex, `.\install.ps1` deja backup en `~/.codex/orquestador-backups\`.
 
 **Actualizar los CLIs**: `codex update`. Hacelo *después* de que los smoke tests
 pasen, para no cambiar la base bajo los pies.
+
+### 7.1. Actualizar desde una versión anterior a las skills de documentación
+
+Si ya tenías el kit híbrido funcionando y querés la versión con `brainstorming`,
+`documentacion` y sincronización de documentación, esto es lo único que cambia.
+
+**Cómo saber en cuál estás:**
+
+```powershell
+Test-Path "$env:USERPROFILE\.claude\skills\documentacion"
+```
+
+`False` → estás en la versión anterior.
+
+**Qué hay que tocar y qué no:**
+
+| Componente | ¿Hace falta actualizarlo? |
+|---|---|
+| Skills de Claude | **Sí** — hay dos skills nuevas y `orquestador` cambió |
+| `agents/tester.md` | **Sí** — suma la trazabilidad de reglas `BR-00X` |
+| `agents/constructor.md`, `agents/explorador.md` | No cambiaron |
+| `scripts/codex-run.ps1` | **No cambió** |
+| `hooks/git-guard.ps1` y `settings.json` | **No cambiaron** |
+| Kit Codex (`~/.codex`) | **No cambió nada**. No hace falta correr `install.ps1` |
+
+O sea: **el puente y el lado Codex quedan como están**. Es una actualización solo
+del lado Claude.
+
+> [!IMPORTANT]
+> El comando de copia de la versión anterior copiaba un único archivo
+> (`skills\orquestador\SKILL.md`). Si lo usás, las dos skills nuevas no se
+> instalan y el orquestador va a intentar invocar skills que no existen. Usá el
+> comando de abajo, que copia el árbol entero.
+
+Desde la raíz del kit nuevo (mismas rutas que el paso 2):
+
+```powershell
+$dst = "$env:USERPROFILE\.claude"
+Copy-Item ".\Orquestador\skills\*"    "$dst\skills\" -Recurse -Force
+Copy-Item ".\Orquestador\agents\*.md" "$dst\agents\" -Force
+```
+
+POSIX:
+
+```bash
+cp -R Orquestador/skills/. ~/.claude/skills/
+cp Orquestador/agents/*.md ~/.claude/agents/
+```
+
+**Reiniciá la sesión de Claude Code.** Los archivos sueltos se detectan en
+caliente, pero las carpetas de skill nuevas no siempre.
+
+**Verificación:**
+
+```powershell
+# 1. Las tres skills instaladas
+Get-ChildItem "$env:USERPROFILE\.claude\skills" -Name
+# esperado: brainstorming, documentacion, orquestador
+
+# 2. El agent tester trae la trazabilidad
+Select-String "BR-00X" "$env:USERPROFILE\.claude\agents\tester.md"
+
+# 3. El puente sigue intacto
+powershell -NoProfile -File "$env:USERPROFILE\.claude\scripts\codex-run.ps1" -BudgetOnly
+```
+
+Si el paso 3 devuelve el veredicto de presupuesto como siempre, la actualización
+no tocó nada del híbrido.
+
+**Sobre tus proyectos ya documentados**: no hay migración. La documentación que ya
+tengas se queda como está y el orquestador la adopta en el formato en que esté —
+nunca crea un `docs/SYSTEM.md` al lado de documentación que ya existe, y no genera
+documentación nueva sin pedirte permiso primero.
+
+**Volver atrás**: borrá `~/.claude/skills/brainstorming` y
+`~/.claude/skills/documentacion`, y restaurá `skills/orquestador/SKILL.md` y
+`agents/tester.md` desde tu copia anterior del kit. No hay estado persistido en
+ningún lado que haya que limpiar.
 
 **Desinstalar el puente** (deja ambos kits intactos):
 

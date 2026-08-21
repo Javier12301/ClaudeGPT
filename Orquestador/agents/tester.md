@@ -41,6 +41,9 @@ implementó, para correr la suite y reportar GREEN/RED con la salida real.
   comportamiento especificado y los edge cases reales (límites, errores, entrada
   inválida en fronteras de confianza). No hagas exhaustividad ritual ni un test
   por getter.
+- **Si la spec cita reglas de negocio `BR-00X`, nombrá el ID en la descripción del
+  test que la cubre.** Es lo que permite después detectar con un `grep` qué reglas
+  documentadas no tiene nadie verificando.
 - Los tests testean **la especificación**, no una implementación imaginada. No
   asumas nombres internos, estructura de archivos ni detalles privados que el
   Constructor todavía no decidió — testeá la interfaz pública que describe la spec.
