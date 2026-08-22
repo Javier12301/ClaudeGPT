@@ -9,6 +9,55 @@ correspondiente de [`docs/SYSTEM.md`](docs/SYSTEM.md) en el mismo diff.
 
 ### Added
 
+- **Estado de capacidad en el gate de presupuesto.** `-BudgetOnly` ahora imprime
+  un estado nombrado —`BALANCED`, `CODEX-PREFERRED`, `SONNET-LEAD`,
+  `CLAUDE-LEAD`, `SURVIVAL`— además del veredicto de siempre. Son dos capas que
+  se componen: el veredicto dice si Codex se puede usar y para qué, el estado
+  dice quién lidera y quién ejecuta. El reparto de trabajo con Codex arranca al
+  50% de la ventana de 5h en vez del 85%, así la cuota cara deja de gastarse en
+  ejecución que Codex absorbe con la suya.
+
+- **`SONNET-LEAD`.** Con Claude arriba del 70%, el orquestador recomienda
+  `/model sonnet` **una sola vez**: sigue siendo la única interfaz con el usuario
+  y sigue delegando rol por rol, pero deja de gastar Opus en vez de racionarlo.
+  Si el usuario no cambia de modelo, se continúa en Opus con el comportamiento de
+  `CODEX-PREFERRED` y no se vuelve a insistir en esa tarea. El cambio de modelo
+  nunca es automático: `/model` es del usuario.
+
+- **Gate de la ventana de 7 días.** Una semana por encima del 80% sube el piso a
+  `CODEX-PREFERRED` aunque la ventana de 5h esté fresca. Antes el routing miraba
+  solo la ventana corta, así que un lunes productivo dejaba el resto de la semana
+  sin cuota y el gate no se enteraba.
+
+- **Contract gate (Fase 3.6).** Cuando el cambio cruza un boundary, se congelan
+  request, response y errores antes de que alguien escriba código, y el contrato
+  congelado va en el prompt del tester y del constructor. Si no cruza ningún
+  boundary, la fase no existe.
+
+- **Verify ladder y regla anti-retry (`BR-008`).** La verificación corre de lo
+  más barato y determinístico a lo más caro y corta ante la falla que invalida
+  seguir. Dos RED lógicos consecutivos agotan los intentos y devuelven al
+  contrato; las fallas de sandbox, red, tooling o salida truncada **no cuentan
+  como retry**, así un gotcha de entorno no bloquea trabajo que nunca falló.
+
+- **Instalación automática.** `install-hibrido.ps1` deja el entorno andando en
+  otra máquina sin depender de que un agente lea la guía: ramifica según
+  `codex login status` —con sesión de ChatGPT instala los dos kits, sin ella
+  instala solo el lado Claude y dice qué falta— y termina corriendo la
+  verificación. Suma `Orquestador/install.ps1` y `Orquestador/verify.ps1`, que
+  clonan el patrón del lado Codex: respaldo timestampeado antes de pisar nada y
+  `-WhatIf` en todo. El merge de `settings.json` preserva las claves, permisos,
+  hooks y plugins del usuario, y reinstalar no acumula duplicados
+  (`Orquestador/tests/test-install-merge.ps1`, 14 checks).
+
+  Plugins y MCPs quedan fuera a propósito —`/plugin install` solo corre dentro de
+  una sesión de Claude Code— así que el instalador los detecta y lista los
+  comandos que faltan en vez de ejecutarlos a ciegas.
+
+- **Campos nuevos en `decisions.jsonl`:** `state`, `phase`, `retry_of` y
+  `claude_7d_used`, con `-Phase` y `-RetryOf` en el wrapper. Sin dashboard ni
+  script agregador: un `Group-Object state` contesta la pregunta que importa.
+
 - **Skill `brainstorming`.** Fase de reducción de incertidumbre antes de
   planificar: reglas de preguntas acotadas, Goal Contract como criterio de salida,
   gate de investigación, evaluación de alternativas y diagnóstico de bugs con
@@ -99,6 +148,24 @@ correspondiente de [`docs/SYSTEM.md`](docs/SYSTEM.md) en el mismo diff.
   Se agregó al merge.
 
 ### Changed
+
+- **`explorador` deja de ser el default para localizar código.** La Fase 2 sube
+  una escalera de costo y para en el primer escalón que alcanza: `git ls-files`
+  para la estructura del repo, Serena para símbolos y referencias, `Grep` para
+  texto, y el `explorador` LLM solo para entender un flujo completo. Cuando se
+  levanta, recibe entrypoints concretos en vez de un área.
+
+- **La partición del trabajo es por región de archivos con dueño independiente,
+  no por capa.** `frontend / backend` era una etiqueta arbitraria. Si dos
+  unidades necesitan editar los mismos archivos, no son dos unidades.
+
+- **Reviewer batcheado.** Una sola pasada de `correctness + security` cuando la
+  tarea no toca auth, permisos, pagos, uploads ni tokens. Dos invocaciones
+  separadas solo cuando sí los toca.
+
+- **Todos los umbrales de presupuesto son constantes nombradas.** `20` y `40`
+  estaban hardcodeados inline en `Get-BudgetVerdict`. Los seis están fijados por
+  mutación: mover cualquiera pone la suite en RED.
 
 - **Rediseño modular y visual de diagramas Mermaid en `README.md`**:
   - Reestructuración de diagramas monolíticos en subgrafos (`subgraph`) por capas jerárquicas (Tech Lead, Ejecución, Arbitraje) para evitar sobrecarga y desproporción visual en GitHub.

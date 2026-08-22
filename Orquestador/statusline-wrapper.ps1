@@ -16,4 +16,27 @@ $inv = [System.Globalization.CultureInfo]::InvariantCulture
 [System.Threading.Thread]::CurrentThread.CurrentUICulture = $inv
 
 $stdin = [Console]::In.ReadToEnd()
-$stdin | & (Join-Path $PSScriptRoot 'statusline\statusline.ps1')
+$line = $stdin | & (Join-Path $PSScriptRoot 'statusline\statusline.ps1')
+
+# Segmento de cuota de Codex. Se lee de un cache con TTL 60s y el refresco se
+# dispara desacoplado: el RPC contra `codex app-server` tarda 1-2s y la
+# statusline se renderiza en cada turno, no puede esperarlo.
+$cache = Join-Path $env:TEMP 'claude\codex-usage-cache.json'
+$stale = -not (Test-Path $cache) -or
+         ((Get-Date) - (Get-Item $cache).LastWriteTime).TotalSeconds -ge 60
+if ($stale) {
+    $refresh = Join-Path $PSScriptRoot 'scripts\codex-run.ps1'
+    if (Test-Path $refresh) {
+        Start-Process powershell -WindowStyle Hidden -ArgumentList `
+            '-NoProfile','-ExecutionPolicy','Bypass','-File',$refresh,'-QuotaCache'
+    }
+}
+
+$seg = ''
+if (Test-Path $cache) {
+    try {
+        $cx = Get-Content $cache -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($null -ne $cx.free_pct) { $seg = ' | CX ' + $cx.free_pct + '%' }
+    } catch { }
+}
+(($line -join "`n") + $seg)

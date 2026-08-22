@@ -30,7 +30,14 @@ Le decís a Claude Code: *"Trabajá como Orquestador"*. A partir de ahí, es la
 única interfaz: decide, delega a Codex cuando conviene, y arbitra el resultado
 antes de entregarlo.
 
-Para instalar el entorno completo desde cero: [INSTALL-HIBRIDO.md](INSTALL-HIBRIDO.md).
+Para instalar el entorno completo desde cero:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-hibrido.ps1
+```
+
+Ramifica solo según tengas Codex autenticado o no, respalda antes de pisar nada y
+termina verificando. Detalle y versión manual: [INSTALL-HIBRIDO.md](INSTALL-HIBRIDO.md).
 
 ---
 

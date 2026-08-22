@@ -7,8 +7,39 @@ Tiempo estimado: 20–30 min, casi todo esperando descargas.
 
 ---
 
+## 0. Camino rápido — instalador
+
+Para el caso normal no hace falta seguir esta guía a mano:
+
+```powershell
+git clone https://github.com/Javier12301/Claudio-y-Gepeto
+cd Claudio-y-Gepeto
+
+# Ver qué va a hacer, sin tocar nada:
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-hibrido.ps1 -WhatIf
+
+# Instalar:
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-hibrido.ps1
+```
+
+Ramifica según `codex login status`: con sesión de ChatGPT instala los dos kits,
+sin ella instala solo el lado Claude, te dice qué falta y sigue funcionando en
+modo Claude-solo. Respalda en `~/.claude/orquestador-backups/<timestamp>` antes
+de pisar cualquier archivo tuyo, y termina corriendo la verificación.
+
+**Dos cosas quedan afuera a propósito**, porque no se pueden ejecutar a ciegas:
+los plugins (`/plugin install` solo corre dentro de una sesión de Claude Code) y
+los MCPs (necesitan `npx`/`uv`). El instalador los detecta y te lista los
+comandos exactos que faltan.
+
+El resto de esta guía es la versión manual, y sigue siendo la referencia de qué
+hace cada paso y por qué.
+
+---
+
 ## Índice
 
+0. [Camino rápido — instalador](#0-camino-rápido--instalador)
 1. [Prerequisitos](#1-prerequisitos)
 2. [Kit Claude](#2-kit-claude)
 3. [Kit Codex](#3-kit-codex)

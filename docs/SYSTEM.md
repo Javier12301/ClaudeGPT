@@ -51,7 +51,7 @@ NO-GO.
 
 Estado: Activa
 Test: —
-Código: `Orquestador/scripts/codex-run.ps1:41,238`
+Código: `Orquestador/scripts/codex-run.ps1` — `$MinFreePercent`, `Get-CodexVerdict`
 
 #### BR-002 — Umbrales de veredicto
 
@@ -60,7 +60,7 @@ implementación voluminosa); a partir de 40%, GO.
 
 Estado: Activa
 Test: —
-Código: `Orquestador/scripts/codex-run.ps1:239-241`
+Código: `Orquestador/scripts/codex-run.ps1` — `$CODEX_WARN_FREE`, `$CODEX_HEAVY_FREE`
 
 | Codex libre | Decisión |
 |---|---|
@@ -70,17 +70,52 @@ Código: `Orquestador/scripts/codex-run.ps1:239-241`
 | < 10% | **NO-GO** — Codex descartado, Claude-only |
 | `spendControlReached` | **NO-GO** duro |
 
-#### BR-003 — Empuje a Codex por presión de Claude
+#### BR-003 — Estado de capacidad
 
-Claude por encima del 85% de su ventana de 5h con Codex por encima del 40%
-libre empuja el trabajo a Codex.
+El routing se resuelve en **dos capas independientes que se componen**. El
+veredicto (BR-001, BR-002) responde *"¿se puede usar Codex, y para qué?"*; el
+estado responde *"¿quién lleva el lead y quién ejecuta?"*.
+
+El nivel de presión de Claude sale de sus dos ventanas:
+
+| Claude 5h usado | Nivel |
+|---|---|
+| < 50% | `fresco` |
+| 50–70% | `presionado` |
+| 70–85% | `apretado` |
+| ≥ 85% | `crítico` |
+
+Una ventana de 7 días por encima del 80% sube el piso a `presionado` aunque la
+de 5h esté fresca. El gate sube el nivel, nunca lo baja.
+
+El estado sale de evaluar estas reglas **de arriba hacia abajo; la primera que
+coincide gana**:
+
+| # | Condición | Estado |
+|---|---|---|
+| 1 | Claude sin dato legible | `BALANCED` |
+| 2 | `crítico` y Codex NO-GO o WARN | `SURVIVAL` |
+| 3 | Codex NO-GO | `CLAUDE-LEAD` |
+| 4 | `crítico` y Codex GO | `SONNET-LEAD` |
+| 5 | `apretado` y Codex GO | `SONNET-LEAD` |
+| 6 | `presionado` y Codex GO | `CODEX-PREFERRED` |
+| 7 | Codex WARN | `CLAUDE-LEAD` |
+| 8 | resto | `BALANCED` |
+
+Las reglas 4–6 exigen veredicto `GO`: un `WARN` no alcanza para poner a Codex a
+ejecutar por más apretado que esté Claude, y cae a la regla 7.
+
+En `CODEX-PREFERRED` y `SONNET-LEAD`, un veredicto `GO` acotado sigue vetando la
+implementación voluminosa: el estado decide quién ejecuta, el veredicto cuánto.
 
 Estado: Activa
-Test: —
-Código: `Orquestador/scripts/codex-run.ps1:54,243`
+Test: `Orquestador/tests/test-codex-run.ps1` — 26 checks
+Código: `Orquestador/scripts/codex-run.ps1` — `Get-ClaudeLevel`, `Add-CapacityState`
 
-Si ninguno de los dos tiene margen, el orquestador informa y propone esperar
-el reset en vez de arrancar un pipeline que va a morir a la mitad.
+**La regla 1 se evalúa primera a propósito.** Sin lectura de la cuota de Claude
+no se infiere ningún estado, ni siquiera con Codex en NO-GO, y el gate degrada al
+comportamiento previo con un aviso. Un cache ausente y uno corrupto se tratan
+igual. **El gate nunca bloquea al orquestador por no poder leer una cuota.**
 
 Consultable a mano en cualquier momento:
 
@@ -91,7 +126,8 @@ powershell -File ~/.claude/scripts/codex-run.ps1 -BudgetOnly
 ```
 == Presupuesto ==
 Codex  : 80% libre (plan plus) - reset 2026-08-21 09:52
-Claude : 5h 29% usado | 7d 25% usado - reset 2026-08-21T05:40:00Z
+Claude : 5h 58% usado | 7d 25% usado - reset 2026-08-21T05:40:00Z
+Estado : CODEX-PREFERRED - Claude planifica y arbitra; ejecucion a Codex.
 Decision: GO - Codex libre 80%. Delegacion normal.
 ```
 
@@ -101,7 +137,22 @@ La consulta de cuota expira a los 15 segundos.
 
 Estado: Activa
 Test: —
-Código: `Orquestador/scripts/codex-run.ps1:55,150`
+Código: `Orquestador/scripts/codex-run.ps1` — `$RPC_TIMEOUT_MS`, `Get-CodexQuota`
+
+#### BR-008 — El retry lógico es el único que cuenta
+
+Dos RED lógicos consecutivos del mismo executor sobre la misma unidad agotan los
+intentos: no hay un tercero, se vuelve al contrato o a la spec.
+
+Un RED lógico es código que corrió y dio un resultado incorrecto
+(`tests.status: "RED"`). Las fallas de infraestructura, sandbox, red, tooling y
+las salidas sin JSON válido llegan como `NOT_RUN`, `blocked: true` o exit code
+distinto de 0, y **no consumen intentos**. Solo los lógicos se registran en
+`retry_of`.
+
+Estado: Activa
+Test: —
+Código: `Orquestador/skills/orquestador/SKILL.md` (criterio del orquestador)
 
 ### Overrides del usuario
 
@@ -154,7 +205,7 @@ La salida sin JSON válido se trunca a 20 líneas.
 
 Estado: Activa
 Test: —
-Código: `Orquestador/scripts/codex-run.ps1:56,584`
+Código: `Orquestador/scripts/codex-run.ps1` — `$MAX_OUTPUT_LINES`
 
 ### Reutilización de sesiones
 
@@ -177,7 +228,7 @@ Un rollout de menos de 400 KB es reusable (`REUSE-OK`).
 
 Estado: Activa
 Test: —
-Código: `Orquestador/scripts/codex-run.ps1:52,372`
+Código: `Orquestador/scripts/codex-run.ps1` — `$REUSE_FREE_KB`, `Get-SessionDetail`
 
 #### BR-005 — Umbrales de reuso condicionado y denegado
 
@@ -186,7 +237,7 @@ Entre 400 KB y 1.2 MB solo se reusa para continuación directa
 
 Estado: Activa
 Test: —
-Código: `Orquestador/scripts/codex-run.ps1:53,373-374`
+Código: `Orquestador/scripts/codex-run.ps1` — `$REUSE_LIMIT_KB`, `Get-SessionDetail`
 
 El umbral sale del tamaño del rollout en
 `~/.codex/sessions/<año>/<mes>/<día>/rollout-<ts>-<SESSION_ID>.jsonl`. Los turnos
@@ -295,12 +346,19 @@ flowchart TD
 | Agente | Modelo | Qué hace |
 |---|---|---|
 | `/orquestador` (skill) | Opus | Habla con vos, decide, delega, arbitra, aplica fixes < ~50 líneas |
-| `explorador` | Sonnet | Solo lectura. Localiza código, devuelve `archivo:línea` |
+| `explorador` | Sonnet | Solo lectura. Entiende un flujo completo y devuelve contrato, riesgos y `archivo:línea` |
 | `tester` | Sonnet | Escribe tests RED desde la spec. Solo toca archivos de test |
 | `constructor` | Sonnet | Spec + RED → GREEN. No escribe sus propios tests |
 
 Los tres subagentes tienen `Agent`/`Task` bloqueados: **solo el Orquestador
 delega**. `tester` y `constructor` precargan la disciplina `ponytail`.
+
+**`explorador` no es el default para localizar código.** La exploración sube una
+escalera de costo y para en el primer escalón que alcanza: `git ls-files` para la
+estructura del repo, Serena para símbolos y referencias, `Grep` para texto, y
+recién el `explorador` LLM para entender un flujo completo con sus riesgos y su
+contrato. Cuando se levanta, recibe scope dirigido —entrypoints concretos y qué
+devolver—, no un área.
 
 ### Roles Codex
 
@@ -331,7 +389,7 @@ Por qué esos cinco roles y no los demás del kit Codex (`explorador`,
 | **D — seguridad** | auth, pagos, permisos, uploads | Pipeline + security-reviewer | Sí |
 | **E — verificación cara** | build/lint/typecheck/suite larga | verifier | Sí |
 | **F — investigación extensa** | comparar libs, migración de versión | docs-researcher | Sí |
-| **G — delegación total** | Claude sin presupuesto, tarea autocontenida | `$constructor` de Codex | Sí, con subloop |
+| **G — delegación total** | Tarea autocontenida que no necesita arbitraje, con Claude apretado | `$constructor` de Codex | Sí, con subloop |
 | **H — auditoría** | "revisá todo el proyecto" | `$revisor-completo` | Sí |
 
 ### Resolución de modelos por tier
@@ -408,17 +466,24 @@ flowchart TD
         GATE -->|"20% a 40%"| PART["<b>GO Acotado</b><br/>Review / Verify / Docs"]
         GATE -->|"> 40%"| FULL["<b>GO Normal</b><br/>Delegación Estándar"]
 
-        NOGO --> CLQ{"¿Claude tiene<br/>margen 5h?"}
-        CLQ -->|Sí| CASO_B["<b>Caso B — Normal</b><br/>Pipeline Claude"]
-        CLQ -->|No| WAIT["<b>Esperar Reset</b><br/>Informar al usuario"]
-
-        FULL --> CLP{"¿Claude 5h<br/>> 85%?"}
-        CLP -->|Sí| CASO_G["<b>Caso G — Total</b><br/>$constructor Codex"]
-        CLP -->|No| NAT_EVAL["Evaluar Naturaleza<br/>de la Tarea"]
+        NOGO --> CLQ{"¿Claude<br/>crítico?"}
+        CLQ -->|No| CASO_B["<b>CLAUDE-LEAD</b><br/>Pipeline Claude"]
+        CLQ -->|Sí| WAIT["<b>SURVIVAL</b><br/>Checkpoint e informar<br/><i>No arrancar nada nuevo</i>"]
     end
 
-    WARN --> NAT_EVAL
-    PART --> NAT_EVAL
+    subgraph PHASE3["3. Estado de Capacidad de Claude"]
+        FULL --> LVL{"Nivel de Claude<br/><i>5h + gate 7d</i>"}
+        PART --> LVL
+        LVL -->|"< 50%"| BAL["<b>BALANCED</b><br/>Reparto por naturaleza"]
+        LVL -->|"50–70%"| PREF["<b>CODEX-PREFERRED</b><br/>Claude piensa · Codex ejecuta"]
+        LVL -->|"> 70%"| SON["<b>SONNET-LEAD</b><br/>Recomendar /model sonnet<br/><i>una sola vez</i>"]
+
+        BAL --> NAT_EVAL["Evaluar Naturaleza<br/>de la Tarea"]
+        PREF --> NAT_EVAL
+        SON --> NAT_EVAL
+    end
+
+    WARN --> CASO_B
 
     NAT_EVAL --> ROUTE["<b>Routing a Casos A–H</b><br/><i>ver Matriz abajo</i>"]
 
@@ -430,9 +495,9 @@ flowchart TD
     classDef step fill:#1e293b,stroke:#38bdf8,stroke-width:1.5px,color:#ffffff
 
     class REQ,ROUTE io
-    class OVR,TRIV,GATE,CLQ,CLP gate
-    class CASO_A,CASO_B soloClaude
-    class PART,FULL,CASO_G conCodex
+    class OVR,TRIV,GATE,CLQ,LVL gate
+    class CASO_A,CASO_B,BAL soloClaude
+    class PART,FULL,PREF,SON conCodex
     class NOGO,WAIT stop
     class PROC,MEM,BUD,NAT_EVAL step
 ```
@@ -568,12 +633,26 @@ de trabajo, una línea por delegación.
 {"ts":"2026-08-20T22:26:35","task":"slugify","role":"constructor","tier":"worker",
  "model":"gpt-5.6-terra","effort":"medium","sandbox":"workspace-write",
  "reused":false,"session":{"id":"01a021ee-...","rollout_kb":134},
- "codex_free_pct":80,"claude_5h_used":29,"exit_code":0,"blocked":false,"findings":null}
+ "codex_free_pct":80,"claude_5h_used":29,"claude_7d_used":25,
+ "state":"CODEX-PREFERRED","phase":"construct","retry_of":null,
+ "exit_code":0,"blocked":false,"findings":null}
 ```
 
 Responde lo que importa: si la tarea fue Claude-only o híbrida, qué roles y
-modelos se levantaron, cómo estaban las cuotas al decidir, si se reusó sesión y
-cuánto había crecido, y cómo terminó.
+modelos se levantaron, cómo estaban las cuotas y el estado al decidir, si se
+reusó sesión y cuánto había crecido, y cómo terminó.
+
+`phase` y `retry_of` los pasa el orquestador (`-Phase`, `-RetryOf`); el resto
+sale del wrapper. `retry_of` registra **solo reintentos por RED lógico**
+(BR-008): una falla de sandbox o de red no es un retry.
+
+No hay script agregador. La pregunta que estos campos existen para responder es
+una sola —**cuántas veces se llegó a `SURVIVAL` con Codex sano**— y se contesta
+desde la terminal:
+
+```powershell
+Get-Content .orquestador\decisions.jsonl | ConvertFrom-Json | Group-Object state
+```
 
 ---
 

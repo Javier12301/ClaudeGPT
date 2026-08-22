@@ -38,8 +38,14 @@ Para todo lo demás, antes de planificar:
 powershell -NoProfile -ExecutionPolicy Bypass -File ~/.claude/scripts/codex-run.ps1 -BudgetOnly
 ```
 
-Devuelve el % libre de Codex, el % usado de Claude (5h y 7d) y un veredicto
-`GO` / `WARN` / `NO-GO`. Con eso elegís ruta:
+Devuelve **dos capas** que se componen y no se pisan:
+
+- **Veredicto** (`GO` / `WARN` / `NO-GO`) — *¿se puede usar Codex, y para qué?*
+- **Estado** (`BALANCED` / `CODEX-PREFERRED` / `SONNET-LEAD` / `CLAUDE-LEAD` /
+  `SURVIVAL`) — *¿quién lleva el lead y quién ejecuta?*
+
+El estado decide el reparto; el veredicto sigue vetando el volumen dentro del
+estado. Con las dos, elegís ruta:
 
 | Caso | Cuándo | Quién ejecuta | Doc impact |
 |---|---|---|---|
@@ -50,7 +56,7 @@ Devuelve el % libre de Codex, el % usado de Claude (5h y 7d) y un veredicto
 | **D — seguridad** | auth, permisos, pagos, uploads, tokens, datos sensibles | Pipeline Claude + `-Role security-reviewer` | Casi seguro |
 | **E — verificación cara** | build/lint/typecheck/suite larga | `-Role verifier` | No |
 | **F — investigación documental extensa** | comparar libs, migración de versión | `-Role docs-researcher` | Solo si decide algo |
-| **G — delegación total** | Claude sin presupuesto y tarea autocontenida | `$constructor` de Codex (maneja su propio subloop) | Casi seguro |
+| **G — delegación total** | Tarea autocontenida que no necesita arbitraje, con Claude apretado | `$constructor` de Codex (maneja su propio subloop) | Casi seguro |
 | **H — auditoría completa** | "revisá todo el proyecto" | `$revisor-completo` de Codex | Según hallazgos |
 
 La columna **Doc impact** es una expectativa, no una orden: lo que se actualiza de
@@ -58,19 +64,70 @@ verdad lo decide la matriz de la Fase 6. Pero el caso A no tiene impacto documen
 **nunca** — sin excepciones. La excepción se convierte en la regla en dos semanas y
 ahí perdés la ruta barata.
 
-Reglas de presupuesto:
+Reglas del veredicto de Codex:
 
 - **NO-GO** (Codex < 10% libre, o `spendControlReached`): Codex queda descartado.
   Seguís Claude-only y se lo decís al usuario con la hora de reset.
 - **WARN** (10–20%): solo si el usuario lo pide explícitamente.
 - **GO acotado** (20–40%): review / verify / docs sí; implementación voluminosa no.
-- **Claude 5h > 85% usado y Codex > 40% libre**: empujá el trabajo a Codex
-  (ruta G) y avisá por qué.
-- **Ambos ajustados**: informá y proponé esperar el reset. No arranques un
-  pipeline que va a morir a la mitad.
+- **GO normal** (≥ 40%): delegación normal, incluso implementación grande.
 
-En el plan al usuario **declará siempre** qué modelo usa cada paso y por qué se
-usa (o no) Codex. El usuario tiene que poder decir "procedé" y nada más.
+### Qué hacer en cada estado
+
+| Estado | Qué hacés |
+|---|---|
+| `BALANCED` | Reparto por naturaleza de la tarea. Casos A–H como siempre |
+| `CODEX-PREFERRED` | Vos pensás, contratás y arbitrás; **la ejecución pesada va a Codex** — explorar a fondo, tester, constructor, verifier |
+| `SONNET-LEAD` | Recomendás `/model sonnet` **una sola vez** y Codex ejecuta |
+| `CLAUDE-LEAD` | Pipeline Claude, sin ritual multi-provider. Codex solo si el usuario lo pide |
+| `SURVIVAL` | **No arranques trabajo nuevo.** Cerrá y hacé checkpoint (ver abajo) |
+
+`CODEX-PREFERRED` es el estado que cambia el hábito: **no esperes a estar al 85%
+para delegar.** A partir del 50% de tu ventana de 5h, todo lo que sea ejecución
+mecánica y verificable contra un contrato lo hace Codex con su cuota, no vos con
+la tuya.
+
+> **El estado nunca bloquea.** Si no se puede leer la cuota de Claude (statusline
+> apagada o cache ilegible), el gate degrada a `BALANCED` y te avisa. Nunca
+> infiere un estado desde un dato que no tiene, y nunca te deja sin herramienta.
+
+### `SONNET-LEAD` — la regla de no insistir
+
+Al entrar en `SONNET-LEAD`, recomendá el cambio de modelo **una vez, al presentar
+el plan**, con el motivo y el número de cuota:
+
+> *Estás al 74% de tu ventana de 5h. Te conviene `/model sonnet`: yo sigo
+> orquestando y hablando con vos, Codex hace el trabajo pesado, y la ventana
+> rinde varias veces más. Si preferís seguir en Opus, procedo igual.*
+
+**Si el usuario no cambia de modelo, seguís en Opus con el comportamiento de
+`CODEX-PREFERRED` y no lo volvés a mencionar en esa tarea.** Ni al delegar, ni al
+arbitrar, ni al cerrar. Repetir la recomendación es la forma más rápida de que
+deje de leer lo que decís. En la tarea siguiente sí podés volver a plantearlo: la
+cuota cambió y la decisión es nueva.
+
+Vos no podés cambiar tu propio modelo — `/model` es del usuario. Nunca digas ni
+sugieras que el cambio es automático.
+
+### `SURVIVAL` — checkpoint, no una última feature
+
+Quedarte sin cuota a mitad de una unidad de trabajo cuesta más de recuperar que
+la unidad entera. Al entrar en `SURVIVAL`, dejás de iniciar trabajo nuevo y
+cerrás lo que está abierto, en este orden:
+
+```
+terminar la unidad actual → tests → verify → working tree consistente
+→ doc sync mínima (ROADMAP) → checkpoint en Engram → informar al usuario
+```
+
+El checkpoint guarda: objetivo, estado GREEN/RED, qué se terminó, qué falta,
+decisiones tomadas, riesgos abiertos y **el siguiente paso concreto**.
+
+> **Regla dura: no intentes "una última feature".** Es exactamente el momento en
+> que sale mal y no queda cuota para arreglarlo.
+
+En el plan al usuario **declará siempre** el estado, qué modelo usa cada paso y
+por qué se usa (o no) Codex. El usuario tiene que poder decir "procedé" y nada más.
 
 ## Fase 0.6 — terreno documental
 
@@ -108,13 +165,48 @@ vía `AskUserQuestion`, la recomendada primero, y seguís.
 
 ## Fase 2 — exploración
 
-Delegá en `explorador`. Paralelismo:
+**`explorador` no es el default para localizar código.** Levantar un Sonnet para
+descubrir que hay un frontend y un backend, o para encontrar dónde está definida
+una función, es gasto puro. Subí la escalera y parás en el primer escalón que
+alcance:
+
+| Necesidad | Herramienta |
+|---|---|
+| Estructura del repo, stack, runner de tests | `git ls-files` filtrado por manifests |
+| Ubicar un símbolo, su definición o sus referencias | **Serena** (`find_symbol`, `find_referencing_symbols`) |
+| Búsqueda textual | `Grep` |
+| Entender un flujo completo, riesgos, contrato | `explorador` Sonnet |
+
+El primer escalón es una línea, no un agente:
+
+```bash
+git ls-files | grep -E '(package\.json|\.csproj|\.sln|requirements\.txt|pyproject\.toml|docker-compose\.yml)$'
+```
+
+Sale de `git ls-files`, nunca de `ls -R`: ignora por construcción todo lo no
+trackeado, que es donde vive el 90% del ruido.
+
+Solo el último escalón justifica un `explorador`. Cuando lo levantás, pasale
+**scope dirigido** — entrypoints concretos y qué devolver — no un área:
+
+```
+Investigá el flujo de consulta de usuarios.
+Entrypoints probables: UsersController, UserService, UserRepository.
+Seguí imports/referencias solo cuando aporten al flujo.
+Devolvé: contrato actual, tests, dependencias, riesgos, archivos que van a cambiar.
+```
+
+Paralelismo:
 
 - **1 explorador** = default.
-- **2 exploradores** (front + back) solo cuando la tarea cruza claramente ambas
-  capas.
-- **3–4** = excepción rara, solo si el código está tan desordenado que ni el
-  límite entre capas está claro. **Esto no es el default.**
+- **2** solo cuando la tarea cruza dos regiones con dueño independiente.
+- **3–4** = excepción rara, solo si el código está tan desordenado que ni los
+  límites están claros. **Esto no es el default.**
+
+> **Dividí por región de archivos con dueño independiente, no por capa.**
+> `frontend / backend` es una etiqueta arbitraria: a veces son dos regiones, a
+> veces una sola. **Si dos unidades necesitan editar los mismos archivos, no son
+> dos unidades.**
 
 ## Fase 3 — el plan al usuario
 
@@ -144,6 +236,29 @@ de forma exacta, antes de delegar "escribilo desde cero" a Constructor.
   normal. Este chequeo **no aplica** a lógica que es inherentemente tuya, no
   genérica.
 
+## Fase 3.6 — contract gate
+
+**Solo si el cambio cruza un boundary:** `frontend ↔ backend`,
+`service ↔ service`, `producer ↔ consumer`, `API ↔ integración`. Si no cruza
+ninguno, **esta fase no existe** — no la pagues por ritual.
+
+Lo más caro del loop es el retry, y su causa más común es implementar contra un
+contrato que todavía no estaba definido. Antes de que alguien escriba código,
+congelá request, response y errores:
+
+```
+GET /users?page=1&pageSize=20&name=foo&status=active
+200 → { "items": [], "page": 1, "pageSize": 20, "total": 180 }
+400 → { "error": "pageSize excede el maximo de 100" }
+```
+
+Recién con eso: `CONTRACT_READY`. El contrato congelado **va en el prompt de
+delegación**, tanto al `tester` como al `constructor` — los dos implementan
+contra el mismo texto, que es lo que evita el desencuentro.
+
+Aplica aunque haya un solo executor secuencial. No es una precondición del
+paralelismo: es una precondición de no reescribir dos veces.
+
 ## Fase 4 — TDD real, en este orden
 
 1. **`tester` primero**, con la **especificación** — no con código de Constructor,
@@ -155,6 +270,52 @@ de forma exacta, antes de delegar "escribilo desde cero" a Constructor.
 
 Este orden existe para evitar que el mismo agente que escribe el código escriba
 el test a su medida. No lo inviertas.
+
+### Verify ladder
+
+Corré **solo las verificaciones relevantes al cambio**, de la más barata y
+determinística a la más cara, y cortá ante una falla que invalide seguir.
+
+**No hay una secuencia universal.** `typecheck → lint → unit → integration → e2e`
+es el orden típico de un repo TypeScript, no una ley: un repo sin typecheck no lo
+tiene, un cambio en una función pura no necesita e2e, y hay proyectos donde el
+lint tarda más que los unit tests. Lo que se aplica es el **criterio**, no la lista.
+
+Tampoco corta cualquier falla: corta la que **invalida continuar**. Si el
+typecheck falla, los tests que dependen de ese símbolo no informan nada y seguir
+es gastar por gusto. Un warning de lint sobre un archivo que el cambio no tocó no
+corta nada.
+
+### Regla anti-retry
+
+**Dos RED lógicos consecutivos del mismo executor sobre la misma unidad ⇒ no hay
+tercer intento.** Volvés al contrato o a la spec. El tercer intento casi nunca
+converge y siempre cuesta.
+
+**Solo cuenta el RED lógico:** el código corrió y el resultado fue incorrecto —
+assertion fallida, contrato roto, comportamiento equivocado. Eso es la evidencia
+de que la spec no alcanza, que es justo lo que la regla busca detectar.
+
+**No cuentan, y se reintentan sin consumir el presupuesto:**
+
+- Infraestructura o tooling — build caído, dependencia sin instalar, runner que
+  no arranca.
+- Sandbox — el `python.exe` de WindowsApps, el `.venv` bajo `elevated`. Codex los
+  marca `NOT_RUN`, no RED, precisamente para no mentir un resultado.
+- Red o timeout, incluido el del RPC de cuota.
+- Salida sin JSON válido que el wrapper truncó.
+
+Es observable en el contrato de salida: el RED lógico trae `tests.status: "RED"`;
+los demás traen `NOT_RUN`, `blocked: true` o exit code distinto de 0. Contar
+estos como retry haría que un gotcha de entorno bloquee trabajo que nunca falló.
+
+Cuando delegues un reintento por RED lógico, pasale `-RetryOf <session-id>` al
+wrapper para que quede registrado. Los otros no se registran.
+
+### Presupuesto por tarea
+
+Al planificar, declará el techo esperado de delegaciones. Si la ejecución lo
+supera, **parás e informás** en vez de seguir.
 
 ## Fase 5 — revisión y fixes
 
@@ -221,8 +382,13 @@ Invocación única, directa por Bash (no gastes un subagente Claude de proxy):
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File ~/.claude/scripts/codex-run.ps1 `
-  -Role constructor -PromptFile <spec.md> -Repo <repo> -Task "<nombre corto>"
+  -Role constructor -PromptFile <spec.md> -Repo <repo> -Task "<nombre corto>" `
+  -Phase construct
 ```
+
+`-Phase` (`explore`, `contract`, `test`, `construct`, `verify`, `review`, `docs`)
+solo alimenta el log de decisiones. Cuesta nada y es lo que después permite ver
+en qué fase se concentran los retries.
 
 Roles disponibles: `constructor`, `reviewer`, `security-reviewer`, `verifier`,
 `docs-researcher`. El wrapper resuelve modelo, effort, sandbox y contrato de
@@ -273,6 +439,11 @@ regresiones, races, edge cases, contratos rotos y cobertura faltante relevante.
 
 `-Role security-reviewer` solo cuando la tarea toca auth, permisos, pagos,
 uploads, tokens, datos sensibles o trust boundaries. No auditorías caras por defecto.
+
+**Batcheá el review cuando no hay superficie de seguridad.** Si la tarea *no*
+toca nada de esa lista, una sola pasada de `reviewer` pidiendo correctness **y**
+security. Dos invocaciones separadas solo cuando sí la toca (caso D), que es
+cuando el security review necesita su propia sesión y su propio foco.
 
 Los findings **se evalúan uno por uno con evidencia**. Nunca aceptes un finding
 porque "lo dijeron dos modelos": vos sos el árbitro final y verificás en el código.
@@ -334,8 +505,8 @@ implementación anterior (312 KB, liviana) en vez de arrancar una nueva"*.
 |---|---|
 | Codex sin cuota | Claude-only. Avisás con la hora de reset |
 | Codex se queda sin cuota a mitad | El trabajo parcial quedó en disco: retomás desde `git diff` |
-| Claude sin cuota, Codex con margen | Ruta G: preparás la spec y delegás entero |
-| Ambos sin cuota | Informás y proponés esperar. No arrancás |
+| Claude apretado, Codex con margen | `SONNET-LEAD`: recomendás `/model sonnet` una vez y delegás la ejecución |
+| Ambos sin cuota | `SURVIVAL`: cerrás la unidad abierta, checkpoint, informás. No arrancás nada nuevo |
 | Codex no autenticado | Decís exactamente qué falta. **No** usás API key: cambiaría la facturación |
 | `app-server` no responde | Cuota desconocida → tratás como WARN, no como GO |
 | Output enorme | El wrapper trunca. Leés el archivo completo solo si hace falta |

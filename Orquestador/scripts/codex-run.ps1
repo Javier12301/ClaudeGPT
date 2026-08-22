@@ -23,7 +23,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('constructor','reviewer','security-reviewer','verifier','docs-researcher')]
+    [ValidateSet('constructor','tester-tdd','explorador','reviewer','security-reviewer','verifier','docs-researcher')]
     [string]$Role,
 
     [string]$Prompt,
@@ -31,10 +31,19 @@ param(
     [string]$Repo = (Get-Location).Path,
     [string]$Task = '',
 
+    # Solo para el log de decisiones. -Phase ubica la delegacion en el pipeline;
+    # -RetryOf lleva el session id del intento anterior y registra UNICAMENTE
+    # reintentos por RED logico: una falla de sandbox, red o tooling no es un
+    # retry. Ver docs/SYSTEM.md BR-008.
+    [ValidateSet('explore','contract','test','construct','verify','review','docs')]
+    [string]$Phase = '',
+    [string]$RetryOf = '',
+
     [string]$Resume,
     [string]$SessionInfo,
 
     [switch]$BudgetOnly,
+    [switch]$QuotaCache,
     [switch]$Ephemeral,
 
     # Minimo de cuota libre exigido a Codex para delegar.
@@ -51,13 +60,26 @@ try { $Repo = (Resolve-Path -LiteralPath $Repo -ErrorAction Stop).ProviderPath }
 # --- politica (ver README.md 4.2 y 5.3) ---
 $REUSE_FREE_KB    = 400     # por debajo: reusar sin dudar
 $REUSE_LIMIT_KB   = 1200    # por encima: sesion nueva obligatoria
-$CLAUDE_PRESSURE  = 85      # % de la ventana de 5h a partir del cual conviene delegar
 $RPC_TIMEOUT_MS   = 15000
 $MAX_OUTPUT_LINES = 20
+
+# Umbrales del veredicto de Codex (capa 1: "se puede usar Codex, y para que").
+# Ver docs/SYSTEM.md BR-001 y BR-002.
+$CODEX_WARN_FREE  = 20      # por debajo: solo si el usuario lo pide
+$CODEX_HEAVY_FREE = 40      # desde aca: implementacion voluminosa permitida
+
+# Umbrales del estado de capacidad de Claude (capa 2: "quien lidera y quien
+# ejecuta"). Ver docs/SYSTEM.md BR-003.
+$CLAUDE_PREFER_5H  = 50     # desde aca Codex ejecuta por defecto
+$CLAUDE_HANDOFF_5H = 70     # desde aca se recomienda /model sonnet
+$CLAUDE_PRESSURE   = 85     # desde aca la ventana esta en estado critico
+$CLAUDE_WEEK_GATE  = 80     # 7d por encima: el nivel no baja de 'presionado'
 
 # Tier por rol. El slug real sale del catalogo vivo, nunca se hardcodea.
 $RoleTier = @{
     'constructor'       = 'worker'
+    'tester-tdd'        = 'worker'
+    'explorador'        = 'cheap'
     'reviewer'          = 'worker'
     'security-reviewer' = 'worker'
     'verifier'          = 'cheap'
@@ -65,7 +87,9 @@ $RoleTier = @{
 }
 $RoleSchema = @{
     'constructor'       = 'impl'
+    'tester-tdd'        = 'impl'
     'verifier'          = 'impl'
+    'explorador'        = 'review'
     'reviewer'          = 'review'
     'security-reviewer' = 'review'
     'docs-researcher'   = 'docs'
@@ -196,7 +220,9 @@ function Format-Epoch($e) {
     return ([DateTimeOffset]::FromUnixTimeSeconds([long]$e)).LocalDateTime.ToString('yyyy-MM-dd HH:mm')
 }
 
-function Get-BudgetVerdict {
+# Capa 1: "se puede usar Codex, y para que". Devuelve GO / WARN / NO-GO.
+# No sabe nada del estado de Claude: eso es la capa 2, mas abajo.
+function Get-CodexVerdict {
     $res = Get-CodexQuota
     $cx  = if ($res) { $res.rateLimits } else { $null }
     $cl  = Get-ClaudeQuota
@@ -205,6 +231,7 @@ function Get-BudgetVerdict {
         CodexFree = $null; CodexReset = 'n/d'; CodexPlan = 'n/d'
         ClaudeFiveHourUsed = $null; ClaudeSevenDayUsed = $null; ClaudeReset = 'n/d'
         Decision = 'UNKNOWN'; Reason = ''; AllowHeavy = $false
+        ClaudeLevel = $null; State = 'UNKNOWN'; StateReason = ''
     }
 
     if ($cl) {
@@ -236,13 +263,88 @@ function Get-BudgetVerdict {
 
     $f = $r.CodexFree
     if     ($f -lt $MinFreePercent) { $r.Decision='NO-GO'; $r.Reason="Codex libre $f% (< $MinFreePercent%). Claude-only. Reset: $($r.CodexReset)" }
-    elseif ($f -lt 20)              { $r.Decision='WARN';  $r.Reason="Codex libre $f%. Solo si el usuario lo pide explicitamente." }
-    elseif ($f -lt 40)              { $r.Decision='GO';    $r.Reason="Codex libre $f%. Review/verify/docs si; implementacion voluminosa no." }
-    else                            { $r.Decision='GO';    $r.Reason="Codex libre $f%. Delegacion normal."; $r.AllowHeavy = $true }
+    elseif ($f -lt $CODEX_WARN_FREE)  { $r.Decision='WARN';  $r.Reason="Codex libre $f%. Solo si el usuario lo pide explicitamente." }
+    elseif ($f -lt $CODEX_HEAVY_FREE) { $r.Decision='GO';    $r.Reason="Codex libre $f%. Review/verify/docs si; implementacion voluminosa no." }
+    else                              { $r.Decision='GO';    $r.Reason="Codex libre $f%. Delegacion normal."; $r.AllowHeavy = $true }
 
-    if ($null -ne $r.ClaudeFiveHourUsed -and $r.ClaudeFiveHourUsed -gt $CLAUDE_PRESSURE -and $f -gt 40) {
+    if ($null -ne $r.ClaudeFiveHourUsed -and $r.ClaudeFiveHourUsed -gt $CLAUDE_PRESSURE -and $f -gt $CODEX_HEAVY_FREE) {
         $r.Reason += " Claude al $($r.ClaudeFiveHourUsed)% de su ventana de 5h: conviene empujar trabajo a Codex."
     }
+    return $r
+}
+
+# Nivel de presion de Claude, derivado solo de sus dos ventanas.
+# Devuelve $null si no hay dato: quien llame nunca debe inventar un nivel.
+function Get-ClaudeLevel($fiveHour, $sevenDay) {
+    if ($null -eq $fiveHour) { return $null }
+
+    $level = if     ($fiveHour -ge $CLAUDE_PRESSURE)   { 'critico' }
+             elseif ($fiveHour -ge $CLAUDE_HANDOFF_5H) { 'apretado' }
+             elseif ($fiveHour -ge $CLAUDE_PREFER_5H)  { 'presionado' }
+             else                                      { 'fresco' }
+
+    # Gate de 7 dias: un lunes productivo no puede dejar la semana sin cuota
+    # solo porque la ventana corta se reseteo. Sube el piso, nunca lo baja.
+    if ($null -ne $sevenDay -and $sevenDay -gt $CLAUDE_WEEK_GATE -and $level -eq 'fresco') {
+        $level = 'presionado'
+    }
+    return $level
+}
+
+# Capa 2: "quien lidera y quien ejecuta". Se resuelve evaluando las reglas de
+# arriba hacia abajo: la primera que coincide gana. Ver docs/SYSTEM.md BR-003.
+function Add-CapacityState($r) {
+    $lvl = Get-ClaudeLevel $r.ClaudeFiveHourUsed $r.ClaudeSevenDayUsed
+    $r.ClaudeLevel = $lvl
+
+    $codexOut = ($r.Decision -eq 'NO-GO')
+    $codexAsk = ($r.Decision -eq 'WARN')   # usable solo si el usuario lo pide
+
+    # 1. Sin dato de Claude no se infiere nada. Va primera a proposito: ninguna
+    #    regla posterior puede leer un nivel que no existe.
+    if ($null -eq $lvl) {
+        $r.State = 'BALANCED'
+        $r.StateReason = 'Sin lectura de la cuota de Claude (statusline apagada o cache ilegible): routing por naturaleza de la tarea.'
+        return
+    }
+
+    if ($lvl -eq 'critico' -and ($codexOut -or $codexAsk)) {
+        $r.State = 'SURVIVAL'
+        $r.StateReason = 'Claude critico y Codex sin margen: no iniciar trabajo nuevo, cerrar la unidad actual y hacer checkpoint.'
+    }
+    elseif ($codexOut) {
+        $r.State = 'CLAUDE-LEAD'
+        $r.StateReason = 'Codex descartado: pipeline Claude, sin ritual multi-provider.'
+    }
+    # Las reglas 4-6 exigen veredicto GO: un WARN no alcanza para poner a Codex
+    # a ejecutar, por mas apretado que este Claude. Cae a la regla 7.
+    elseif (-not $codexAsk -and ($lvl -eq 'critico' -or $lvl -eq 'apretado')) {
+        $r.State = 'SONNET-LEAD'
+        $r.StateReason = "Claude al $($r.ClaudeFiveHourUsed)% de su ventana de 5h: recomendar /model sonnet una vez; Codex ejecuta."
+    }
+    elseif (-not $codexAsk -and $lvl -eq 'presionado') {
+        $r.State = 'CODEX-PREFERRED'
+        $r.StateReason = 'Claude planifica y arbitra; ejecucion a Codex.'
+    }
+    elseif ($codexAsk) {
+        $r.State = 'CLAUDE-LEAD'
+        $r.StateReason = 'Codex en WARN: pipeline Claude salvo que el usuario pida lo contrario.'
+    }
+    else {
+        $r.State = 'BALANCED'
+        $r.StateReason = 'Ambos con margen: reparto por naturaleza de la tarea.'
+    }
+
+    # El veredicto sigue vetando el volumen dentro del estado: las dos capas se
+    # componen, no se pisan.
+    if (-not $r.AllowHeavy -and ($r.State -eq 'CODEX-PREFERRED' -or $r.State -eq 'SONNET-LEAD')) {
+        $r.StateReason += ' Codex acotado: sin implementacion voluminosa.'
+    }
+}
+
+function Get-BudgetVerdict {
+    $r = Get-CodexVerdict
+    Add-CapacityState $r
     return $r
 }
 
@@ -253,6 +355,7 @@ function Show-Budget($v) {
     $c5 = if ($null -ne $v.ClaudeFiveHourUsed) { "$($v.ClaudeFiveHourUsed)% usado" } else { 'n/d' }
     $c7 = if ($null -ne $v.ClaudeSevenDayUsed) { "$($v.ClaudeSevenDayUsed)% usado" } else { 'n/d' }
     Write-Output ("Claude : 5h {0} | 7d {1} - reset {2}" -f $c5, $c7, $v.ClaudeReset)
+    Write-Output ("Estado : {0} - {1}" -f $v.State, $v.StateReason)
     Write-Output ("Decision: {0} - {1}" -f $v.Decision, $v.Reason)
 }
 
@@ -406,7 +509,30 @@ function Write-DecisionLog($entry) {
     }
 }
 
+# Dot-sourcear el script carga solo las funciones: es como lo testea
+# Orquestador/tests/test-codex-run.ps1 sin invocar a codex.
+if ($MyInvocation.InvocationName -eq '.') { return }
+
 # ============================================================== modos ===
+
+if ($QuotaCache) {
+    # Cache de cuota para la statusline. El RPC contra app-server tarda 1-2s:
+    # jamas debe correr sincronico en el render, por eso se cachea aparte.
+    $res = Get-CodexQuota
+    $rl  = if ($res) { $res.rateLimits } else { $null }
+    $out = [ordered]@{
+        ts        = (Get-Date).ToString('o')
+        free_pct  = Get-FreePercent $res
+        plan      = if ($rl) { $rl.planType } else { $null }
+        resets_at = if ($rl -and $rl.primary) { Format-Epoch $rl.primary.resetsAt } else { 'n/d' }
+    }
+    $dir = Join-Path $env:TEMP 'claude'
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+    [System.IO.File]::WriteAllText((Join-Path $dir 'codex-usage-cache.json'),
+                                   ($out | ConvertTo-Json -Compress),
+                                   (New-Object System.Text.UTF8Encoding($false)))
+    exit 0
+}
 
 if ($BudgetOnly) {
     $v = Get-BudgetVerdict
@@ -603,6 +729,10 @@ Write-DecisionLog ([ordered]@{
     session  = @{ id = $sessionId; rollout_kb = $(if ($detail) { $detail.Kb } else { $null }) }
     codex_free_pct = $verdict.CodexFree
     claude_5h_used = $verdict.ClaudeFiveHourUsed
+    claude_7d_used = $verdict.ClaudeSevenDayUsed
+    state          = $verdict.State
+    phase          = $(if ($Phase)   { $Phase }   else { $null })
+    retry_of       = $(if ($RetryOf) { $RetryOf } else { $null })
     exit_code = $run.ExitCode
     blocked   = $(if ($payload -and $payload.PSObject.Properties.Name -contains 'blocked') { [bool]$payload.blocked } else { $false })
     findings  = $(if ($payload -and $payload.PSObject.Properties.Name -contains 'findings') { @($payload.findings).Count } else { $null })

@@ -431,3 +431,62 @@ Lead, los subagentes son ejecución más barata.
 
 ### Referencias
 SYSTEM.md § 3 Arquitectura (Roles Claude)
+
+---
+
+## D-013 — SONNET-LEAD en vez de CODEX-LEAD
+
+Estado: Aceptada
+Fecha: 2026-08-22
+
+### Contexto
+El empuje a Codex arrancaba recién con Claude arriba del 85% de su ventana de
+5h (BR-003 anterior), y el routing ignoraba la ventana de 7 días. Para cuando
+el gate reaccionaba, ya se había gastado la cuota cara en trabajo que Codex
+podía absorber con la suya intacta.
+
+Hacía falta además un comportamiento para cuando la ventana de Claude sí se
+aprieta y Codex tiene margen.
+
+### Opciones consideradas
+A. `CODEX-HEAVY` — Opus se limita a contrato y arbitraje.
+B. `CODEX-LEAD` — un thread persistente de Codex con `agents.enabled = true`
+   se auto-orquesta, y Claude puentea la interacción con el usuario.
+C. `SONNET-LEAD` — el orquestador recomienda `/model sonnet`; el lead sigue
+   siendo Claude y sigue delegando rol por rol.
+
+### Decisión
+C, más el estado intermedio `CODEX-PREFERRED` a partir del 50% y un gate de la
+ventana de 7 días al 80%.
+
+### Motivo
+A raciona Opus pero lo sigue gastando. B es un protocolo completo —estado,
+timeouts, `request_user_input` puenteado, modos de falla propios— que degrada
+la UX exactamente cuando el usuario está cansado y sin cuota, y rompe el
+invariante de un solo Tech Lead.
+
+C deja de gastar Opus en vez de racionarlo, conserva el invariante, y no
+necesita protocolo nuevo: Sonnet corre la misma skill. En esa etapa el
+razonamiento de Opus no hace falta, porque Codex hace el trabajo pesado y el
+lead solo comunica y despacha.
+
+El estado y el veredicto quedan como capas separadas que se componen: el
+veredicto responde si Codex se puede usar, el estado quién lidera y ejecuta.
+Colapsarlas obligaría a reescribir BR-001 y BR-002 sin ganar nada.
+
+### Consecuencias
++ La ventana de 5h rinde varias veces más bajo presión.
++ Retira de la mesa el `lead.toml` con `agents.enabled = true` que estaba
+  pendiente en ROADMAP Fase 3: si el lead barato es Sonnet, Codex no necesita
+  auto-orquestarse nunca.
++ Los rangos del veredicto de Codex no se tocan.
+- **El arbitraje en Sonnet es de menor calidad que en Opus.** Es un intercambio
+  aceptable bajo presión de cuota, no una mejora.
+- El cambio de modelo no es automático: una skill no puede cambiar el modelo de
+  su sesión. El orquestador recomienda una vez y, si el usuario no cambia,
+  sigue en Opus con el comportamiento de `CODEX-PREFERRED`.
+- Los umbrales 50/70/80 son provisorios y sin evidencia. Se recalibran con los
+  campos nuevos de `decisions.jsonl` después de ~25 tareas.
+
+### Referencias
+SYSTEM.md § 2 BR-003 · D-012 (el lead sí puede ser Sonnet; el subagente no)
