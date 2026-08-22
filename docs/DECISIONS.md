@@ -538,3 +538,61 @@ host, y `Start-Process -WindowStyle`. Se neutralizaron todos.
 
 ### Referencias
 SYSTEM.md § 2 BR-001 · INSTALL-HIBRIDO.md § 1
+
+---
+
+## D-015 — Señal de vida por tee del stream, en vez de `-Background` con registry
+
+Estado: Aceptada
+Fecha: 2026-08-22
+
+### Contexto
+Una delegación a Codex tarda minutos y no emitía absolutamente nada hasta
+terminar. Desde afuera, "trabajando" y "colgado" se ven igual. La Fase 3 del
+ROADMAP tenía anotado un registry de jobs + `-Background` como "único camino a la
+observabilidad en Windows", después de descartar `codex agents` (exige `--remote`
+y el daemon es solo Unix).
+
+Al ir a implementarlo apareció el dato que cambia el análisis: **`--json` ya se le
+pasaba a `codex exec`** desde siempre. El stream de eventos existía; lo que faltaba
+era mirarlo. `Invoke-CodexCli` consumía el stdout con un único `ReadToEndAsync()`,
+que no entrega nada hasta el EOF.
+
+### Opciones consideradas
+A. Registry de jobs + `-Background` + `codex-ps.ps1`, como estaba planeado.
+B. Tee del stream `--json` a un log, más un heartbeat para la statusline.
+C. Las dos: B ahora, A detrás de un flag opcional.
+
+### Decisión
+B. El wrapper sigue bloqueando.
+
+### Motivo
+El problema real declarado por el usuario era *"saber que no se murió"*, y para
+eso el registry es desproporcionado: A cambia el protocolo de delegación (lanzar y
+recolectar en vez de llamar), y trae PIDs huérfanos, recolección del JSON final y
+timeouts a mano. B resuelve el problema declarado sin tocar nada aguas abajo — el
+`return` de `Invoke-CodexCli` es idéntico, así que el parseo del `session_id`, el
+payload y `decisions.jsonl` no se enteran. C paga el costo de escribir y testear la
+rama de A sin que nadie la haya pedido todavía.
+
+`-Background` no está descartado, está diferido: se hace el día que moleste el
+bloqueo o haga falta paralelismo real. Ese día el registry vuelve a tener sentido,
+porque ahí sí puede haber más de un job.
+
+### Consecuencias
+- Sigue sin haber paralelismo: una delegación a la vez.
+- `-LiveLog` es opcional en `Invoke-CodexCli` a propósito: `login status` y
+  `debug models` usan la misma función y no deben loguear ni pisar el heartbeat.
+- **El tee obliga a escribir el stdin de forma asíncrona.** La rama sin `-LiveLog`
+  arranca `ReadToEndAsync()` *antes* de escribir stdin, así que el stdout se drena
+  solo. Leer línea a línea invierte ese orden y reintroduce el deadlock clásico de
+  pipes: si el hijo llena su stdout mientras el padre llena el stdin del hijo, los
+  dos quedan bloqueados. Por eso la rama `-LiveLog` usa `WriteAsync` + `WaitAny`
+  sobre `@(lectura, escritura)` y cierra stdin desde el bucle. Lo encontró el
+  reviewer de Codex sobre este mismo cambio; está cubierto por un test de runtime
+  con 500 KB de stdin contra un hijo que emite 2000 líneas antes de leer.
+- El heartbeat se borra al terminar la corrida: es lo que hace desaparecer el
+  segmento de la statusline sin enseñarle a distinguir estados.
+
+### Referencias
+ROADMAP.md Fase 3 · INSTALL-HIBRIDO.md § 6 (test 16) y § 8 · CHANGELOG.md

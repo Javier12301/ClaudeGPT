@@ -9,6 +9,16 @@ correspondiente de [`docs/SYSTEM.md`](docs/SYSTEM.md) en el mismo diff.
 
 ### Added
 
+- **Señal de vida de Codex.** Una delegación era silencio total hasta que
+  terminaba. `--json` ya se le pasaba a `codex exec`, pero `Invoke-CodexCli`
+  consumía el stdout con un solo `ReadToEndAsync()`: el stream existía y nadie lo
+  miraba. Ahora, con `-LiveLog`, el stdout se lee línea a línea y se vuelca a
+  `$env:TEMP\claude\codex-live.log` (tailable con `Get-Content -Wait`), mientras
+  un heartbeat alimenta el segmento `CX> <rol> <tiempo> <evento>` de la barra de
+  estado. El heartbeat se borra al terminar, así que el segmento desaparece solo.
+  Sin `-LiveLog` la función se comporta igual que antes, que es lo que necesitan
+  `login status` y `debug models`.
+
 - **Modo Claude-solo de verdad.** Sin `codex` instalado, el gate devuelve NO-GO
   con una razón propia —distinta del WARN de "`app-server` no responde"— y el
   orquestador enruta a `CLAUDE-LEAD`. Antes el wrapper tiraba una excepción al

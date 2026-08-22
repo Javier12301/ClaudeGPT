@@ -116,8 +116,79 @@ function ConvertTo-CmdArg([string]$a) {
     return '"' + $s + '"'
 }
 
+# Directorio de estado que comparte el wrapper con la statusline: cache de cuota,
+# log vivo y heartbeat de Codex. statusline-wrapper.ps1 lee los tres de aca.
+function Get-ClaudeTempDir {
+    $dir = Join-Path $(if ($env:TEMP) { $env:TEMP } else { [IO.Path]::GetTempPath() }) 'claude'
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+    return $dir
+}
+
+# --- senal de vida de Codex -------------------------------------------------
+# Una delegacion tarda minutos y hasta ahora era silencio total: --json ya se le
+# pasaba a `codex exec`, pero el stdout se consumia de una sola vez al final. El
+# heartbeat reduce cada linea de ese stream a una etiqueta y la deja donde la
+# statusline la lee una vez por turno.
+$script:CxHbFile  = $null
+$script:CxHbStart = $null
+$script:CxHbRole  = ''
+$script:CxHbPhase = ''
+$script:CxHbItems = 0
+$script:CxHbLast  = [datetime]::MinValue
+
+# Solo la etiqueta: son cientos de lineas por corrida y parsear el JSON entero
+# de cada una para leer un campo no se paga.
+function Get-EventType([string]$Line) {
+    if ([string]::IsNullOrEmpty($Line)) { return '' }
+    $m = [regex]::Match($Line, '"type"\s*:\s*"([A-Za-z_]+)"')
+    if ($m.Success) { return $m.Groups[1].Value }
+    return ''
+}
+
+function Start-CodexHeartbeat {
+    param([string]$Role, [string]$Phase)
+    $script:CxHbFile  = Join-Path (Get-ClaudeTempDir) 'codex-activity.json'
+    $script:CxHbStart = Get-Date
+    $script:CxHbRole  = $Role
+    $script:CxHbPhase = $Phase
+    $script:CxHbItems = 0
+    $script:CxHbLast  = [datetime]::MinValue
+    Write-CodexHeartbeat -EventType 'iniciando' -Force
+}
+
+function Write-CodexHeartbeat {
+    param([string]$EventType, [switch]$Force)
+    if (-not $script:CxHbFile -or [string]::IsNullOrEmpty($EventType)) { return }
+    # El contador se lleva siempre, aunque la escritura se saltee por throttle.
+    if ($EventType -eq 'item_completed') { $script:CxHbItems++ }
+    if (-not $Force -and ((Get-Date) - $script:CxHbLast).TotalSeconds -lt 1) { return }
+    $script:CxHbLast = Get-Date
+    $out = [ordered]@{
+        role       = $script:CxHbRole
+        phase      = $script:CxHbPhase
+        started    = $script:CxHbStart.ToString('o')
+        last_event = $EventType
+        items      = $script:CxHbItems
+    }
+    [System.IO.File]::WriteAllText($script:CxHbFile,
+                                   ($out | ConvertTo-Json -Compress),
+                                   (New-Object System.Text.UTF8Encoding($false)))
+}
+
+# Borrar el archivo es lo que hace desaparecer el segmento de la statusline: sin
+# esto habria que ensenarle a distinguir "corriendo" de "termino hace rato".
+function Stop-CodexHeartbeat {
+    if ($script:CxHbFile) {
+        Remove-Item $script:CxHbFile -Force -ErrorAction SilentlyContinue
+        $script:CxHbFile = $null
+    }
+}
+
 function Invoke-CodexCli {
-    param([string[]]$CodexArgs, [int]$TimeoutSec = 900, [string]$StdinText)
+    # -LiveLog activa el consumo linea a linea del stdout (tee al archivo +
+    # heartbeat). Sin el parametro la funcion se comporta igual que siempre, que
+    # es lo que necesitan `login status` y `debug models`.
+    param([string[]]$CodexArgs, [int]$TimeoutSec = 900, [string]$StdinText, [string]$LiveLog)
     if (-not $CodexCmd) { throw 'codex no esta en el PATH.' }
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName  = $CodexCmd
@@ -130,17 +201,72 @@ function Invoke-CodexCli {
     if ($useStdin) { $psi.RedirectStandardInput = $true }
 
     $p = [System.Diagnostics.Process]::Start($psi)
-    $so = $p.StandardOutput.ReadToEndAsync()
+    # stderr siempre async: se drena en paralelo y no puede trabar al stdout.
     $se = $p.StandardError.ReadToEndAsync()
+    $so = if ($LiveLog) { $null } else { $p.StandardOutput.ReadToEndAsync() }
+    $stdinTask = $null
     if ($useStdin) {
         # .NET Framework no tiene StandardInputEncoding, y el StreamWriter por
         # defecto usa el codepage OEM: codex rechaza eso como "not valid UTF-8".
         # Escribimos los bytes UTF-8 directo al stream de abajo.
         $bytes = [System.Text.Encoding]::UTF8.GetBytes($StdinText)
-        $p.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
-        $p.StandardInput.BaseStream.Flush()
-        $p.StandardInput.Close()   # EOF explicito: sin esto codex espera para siempre
+        if ($LiveLog) {
+            # Async, y el Close se hace desde el bucle de lectura. Escribir aca de
+            # forma sincronica es un deadlock: el bucle todavia no arranco, asi que
+            # nadie drena el stdout; si el hijo llena ese pipe mientras nosotros
+            # llenamos el suyo, los dos quedamos bloqueados. La rama sin -LiveLog no
+            # tiene el problema porque su ReadToEndAsync ya esta corriendo.
+            $stdinTask = $p.StandardInput.BaseStream.WriteAsync($bytes, 0, $bytes.Length)
+        } else {
+            $p.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+            $p.StandardInput.BaseStream.Flush()
+            $p.StandardInput.Close()   # EOF explicito: sin esto codex espera para siempre
+        }
     }
+    if ($LiveLog) {
+        # ReadLineAsync + Wait, no ReadLine(): el ReadLine sincronico se colgaria
+        # para siempre si codex enmudece, y hoy el timeout si corta. El deadline
+        # unico reparte el mismo presupuesto entre todas las lecturas.
+        $sb = New-Object System.Text.StringBuilder
+        $w  = New-Object System.IO.StreamWriter($LiveLog, $false, (New-Object System.Text.UTF8Encoding($false)))
+        $w.AutoFlush = $true   # sin esto `Get-Content -Wait` no ve nada hasta el final
+        $deadline = (Get-Date).AddSeconds($TimeoutSec)
+        try {
+            while ($true) {
+                $t = $p.StandardOutput.ReadLineAsync()
+                # Mientras quede stdin por escribir hay que esperar a los dos a la
+                # vez: el hijo puede no emitir una sola linea hasta recibir el EOF,
+                # y el EOF no se puede mandar hasta que el write termine.
+                while ($true) {
+                    $ms = [int][Math]::Max(0, ($deadline - (Get-Date)).TotalMilliseconds)
+                    $pending = if ($stdinTask) { @($t, $stdinTask) } else { @($t) }
+                    $i = [System.Threading.Tasks.Task]::WaitAny($pending, $ms)
+                    if ($i -lt 0) {
+                        try { $p.Kill() } catch {}
+                        return @{ ExitCode = 124; Out = $sb.ToString(); Err = "timeout tras $TimeoutSec s" }
+                    }
+                    if ($stdinTask -and [object]::ReferenceEquals($pending[$i], $stdinTask)) {
+                        $p.StandardInput.BaseStream.Flush()
+                        $p.StandardInput.Close()   # EOF explicito: sin esto codex espera para siempre
+                        $stdinTask = $null
+                        continue                   # seguimos esperando la linea
+                    }
+                    break
+                }
+                if ($null -eq $t.Result) { break }   # EOF
+                [void]$sb.AppendLine($t.Result)
+                $w.WriteLine($t.Result)
+                Write-CodexHeartbeat -EventType (Get-EventType $t.Result)
+            }
+        } finally { $w.Dispose() }
+        $ms = [int][Math]::Max(0, ($deadline - (Get-Date)).TotalMilliseconds)
+        if (-not $p.WaitForExit($ms)) {
+            try { $p.Kill() } catch {}
+            return @{ ExitCode = 124; Out = $sb.ToString(); Err = "timeout tras $TimeoutSec s" }
+        }
+        return @{ ExitCode = $p.ExitCode; Out = $sb.ToString(); Err = $se.Result }
+    }
+
     if (-not $p.WaitForExit($TimeoutSec * 1000)) {
         try { $p.Kill() } catch {}
         return @{ ExitCode = 124; Out = ''; Err = "timeout tras $TimeoutSec s" }
@@ -535,9 +661,7 @@ if ($QuotaCache) {
         plan      = if ($rl) { $rl.planType } else { $null }
         resets_at = if ($rl -and $rl.primary) { Format-Epoch $rl.primary.resetsAt } else { 'n/d' }
     }
-    $dir = Join-Path $(if ($env:TEMP) { $env:TEMP } else { [IO.Path]::GetTempPath() }) 'claude'
-    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
-    [System.IO.File]::WriteAllText((Join-Path $dir 'codex-usage-cache.json'),
+    [System.IO.File]::WriteAllText((Join-Path (Get-ClaudeTempDir) 'codex-usage-cache.json'),
                                    ($out | ConvertTo-Json -Compress),
                                    (New-Object System.Text.UTF8Encoding($false)))
     exit 0
@@ -661,7 +785,18 @@ $cxArgs += @(
 if ($Ephemeral -and -not $isResume) { $cxArgs += '--ephemeral' }
 $cxArgs += '-'   # el prompt entra por stdin: evita limites y quoting de la linea de comandos
 
-$run = Invoke-CodexCli -CodexArgs $cxArgs -TimeoutSec 1800 -StdinText $fullPrompt
+# Senal de vida: el log crece linea a linea mientras codex trabaja y el heartbeat
+# alimenta el segmento de la statusline. Ver INSTALL-HIBRIDO.md seccion 8.
+$liveLog = Join-Path (Get-ClaudeTempDir) 'codex-live.log'
+Write-Output "Codex trabajando ($Role). Seguimiento en vivo:"
+Write-Output "  Get-Content -Wait '$liveLog'"
+Start-CodexHeartbeat -Role $Role -Phase $Phase
+
+$run = Invoke-CodexCli -CodexArgs $cxArgs -TimeoutSec 1800 -StdinText $fullPrompt -LiveLog $liveLog
+
+# Aca la corrida ya termino: apagar el heartbeat antes de cualquier salida, para
+# que el segmento no quede pegado en la statusline si mas abajo se hace exit.
+Stop-CodexHeartbeat
 
 # --- resultado ---
 $rawOut  = ''

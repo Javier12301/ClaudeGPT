@@ -211,6 +211,43 @@ Estado: Activa
 Test: —
 Código: `Orquestador/scripts/codex-run.ps1` — `$MAX_OUTPUT_LINES`
 
+### Señal de vida durante la delegación
+
+El punto 2 de arriba —`--json` va a un stream aparte, nunca al contexto de
+Claude— es justamente lo que permite mirarlo sin pagar tokens. El wrapper vuelca
+ese stream a disco a medida que llega (`-LiveLog`) y publica un heartbeat que la
+statusline lee una vez por turno. Ver `D-015`.
+
+| Archivo | Qué es | Quién lo lee |
+|---|---|---|
+| `$env:TEMP\claude\codex-live.log` | el stream `--json` crudo, línea a línea | vos, con `Get-Content -Wait` |
+| `$env:TEMP\claude\codex-activity.json` | rol, fase, inicio, último evento, items | `statusline-wrapper.ps1` |
+
+#### BR-009 — El heartbeat existe solo durante la corrida
+
+El archivo de actividad se crea al empezar la delegación y se **borra** al
+terminar, en el mismo punto para todos los caminos de salida. Su presencia es lo
+que significa "corriendo": la statusline no distingue estados, solo lo muestra si
+está y tiene menos de 90 s.
+
+Estado: Activa
+Test: `Orquestador/tests/test-codex-run.ps1` — `Stop-CodexHeartbeat borra el archivo`
+Código: `Orquestador/scripts/codex-run.ps1` — `Start/Write/Stop-CodexHeartbeat`
+
+#### BR-010 — Con `-LiveLog`, el stdin se escribe asíncrono
+
+La rama que lee el stdout línea a línea **no puede** escribir el stdin de forma
+sincrónica: nadie estaría drenando el stdout, y si el hijo llena ese pipe
+mientras el padre llena el suyo, los dos quedan trabados. El deadlock es
+irrecuperable — ocurre dentro del `Write`, que no tiene timeout, así que el
+`TimeoutSec` del wrapper tampoco corta. La rama sin `-LiveLog` no lo sufre porque
+su `ReadToEndAsync()` ya está corriendo antes del write.
+
+Estado: Activa
+Test: `Orquestador/tests/test-codex-run.ps1` — 500 KB de stdin contra un hijo que
+emite 2000 líneas antes de leer
+Código: `Orquestador/scripts/codex-run.ps1` — `WriteAsync` + `Task::WaitAny`
+
 ### Reutilización de sesiones
 
 **Se reusa** (`-Resume <SESSION_ID>`) cuando se cumplen las tres:

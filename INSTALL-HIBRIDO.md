@@ -231,6 +231,8 @@ que importa es que los tres tiers resuelvan a algo.
 | 12 | Aislamiento de rol | reviewer tras constructor | sesión nueva, no hereda |
 | 13 | NO-GO por cuota | `-MinFreePercent 99` | sale sin invocar a Codex, exit 2 |
 | 14 | Sin autenticar | `codex logout` en una prueba | mensaje claro, exit 5, sin fallback a API key |
+| 15 | Serena resuelve simbolos | ver abajo | ~20 funciones de `codex-run.ps1` |
+| 16 | Senal de vida de Codex | ver abajo | el log crece mientras corre |
 
 **Test 4** — sin publicar nada:
 
@@ -251,6 +253,29 @@ Bloqueado por el Orquestador: publicar cambios es exclusivo del usuario.
 
 Sin remote, aunque el guard fallara no habría a dónde publicar. **No pruebes esto
 en un repo real.**
+
+**Test 15** — el unico que confirma que Serena funciona de verdad. Pedile a
+Claude, en una sesion abierta:
+
+> corré `get_symbols_overview` sobre `Orquestador/scripts/codex-run.ps1`
+
+Debe devolver ~20 funciones (`Get-CodexQuota`, `Invoke-CodexCli`, …). Si tira
+error o vuelve vacío, andá a [§ 8 — *Serena no devuelve símbolos*](#8-problemas-conocidos).
+
+> **`verify.ps1` no puede validar esto.** Solo comprueba que `pwsh` esté en el
+> PATH y que el MCP esté configurado — que Serena *resuelva* símbolos depende de
+> un language server que vive en el proceso del MCP, y eso únicamente se ve desde
+> una sesión de Claude. Un `verify.ps1` en verde **no** garantiza que Serena ande.
+
+**Test 16** — mientras una delegación a Codex está corriendo, en otra ventana:
+
+```powershell
+Get-Content -Wait "$env:TEMP\claude\codex-live.log"
+```
+
+El archivo crece línea a línea mientras Codex trabaja. En paralelo, la barra de
+estado muestra `CX> <rol> <tiempo> <evento>`, y el segmento desaparece solo
+cuando la corrida termina.
 
 **Test 13**:
 
@@ -395,6 +420,33 @@ El actual escribe bytes UTF-8 directo al stream (.NET Framework no tiene
 
 **"Output schema file is not valid JSON".** Ídem: `Set-Content -Encoding UTF8`
 escribe BOM en PS 5.1. El wrapper actual usa `UTF8Encoding($false)`.
+
+**Serena no devuelve símbolos.** `get_symbols_overview` o `find_symbol` sobre un
+`.ps1` tira error o vuelve vacío, y la Fase 2 del SKILL cae a `Grep` sin que se
+note. **Causa:** `.serena/project.yml` declara el language server `powershell`,
+que necesita `pwsh` 7+. **Y hay un segundo paso que es el que se olvida:** el MCP
+hereda el PATH del proceso que lo lanzó, así que instalar `pwsh` con Claude Code
+abierto **no alcanza** — el MCP sigue con el PATH viejo hasta que se relanza.
+
+```powershell
+pwsh --version                    # si falla: winget install Microsoft.PowerShell
+```
+
+**Fix: instalá `pwsh` 7 y cerrá y reabrí Claude Code.** Después verificá con el
+Test 15 de § 6. Si `pwsh --version` anda en la terminal pero Serena sigue sin
+resolver, es que la sesión se abrió antes de la instalación: reabrila.
+
+**No sé si Codex sigue vivo.** Una delegación tarda minutos y antes era silencio
+total. Hoy el wrapper vuelca el stream `--json` a un log a medida que llega:
+
+```powershell
+Get-Content -Wait "$env:TEMP\claude\codex-live.log"
+```
+
+Y la barra de estado muestra `CX> <rol> <tiempo> <último evento>` mientras corre.
+El segmento sale de `$env:TEMP\claude\codex-activity.json`, que el wrapper borra
+al terminar: por eso desaparece solo. Si el segmento queda pegado, la statusline
+lo descarta igual a los 90 segundos sin refresco.
 
 **Instalar `pwsh` 7 rompe cmdlets de PowerShell 5.1.** El instalador de
 PowerShell 7 antepone sus módulos al `PSModulePath` de la máquina. Cuando arranca

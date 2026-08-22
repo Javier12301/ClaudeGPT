@@ -326,6 +326,109 @@ try {
         $ErrorActionPreference = $previousEap
         $env:PATH = $previousPath
     }
+
+    # ----------------------------------- senal de vida de Codex (heartbeat) ---
+    # Get-EventType saca la etiqueta de una linea del stream --json sin parsear
+    # el JSON entero. Los tipos son los reales de un rollout de codex 0.149.0.
+    Check ((Get-EventType '{"timestamp":"x","type":"task_started","payload":{}}') -eq 'task_started') `
+        'Get-EventType extrae el tipo de una linea JSONL de codex'
+    Check ((Get-EventType '{"type":"item_completed","item":{"type":"CommandExecution"}}') -eq 'item_completed') `
+        'Get-EventType toma el primer type, no el anidado'
+    Check ((Get-EventType '{"foo":"bar"}') -eq '') 'Get-EventType devuelve vacio si la linea no trae type'
+    Check ((Get-EventType '') -eq '') 'Get-EventType tolera la linea vacia'
+    Check ((Get-EventType 'esto no es json') -eq '') 'Get-EventType tolera una linea que no es JSON'
+
+    $hbTemp = Join-Path $env:TEMP ("test-hb-" + [guid]::NewGuid().ToString('N'))
+    $previousTempHb = $env:TEMP
+    $env:TEMP = $hbTemp
+    try {
+        New-Item -ItemType Directory -Force -Path $hbTemp | Out-Null
+        $hbFile = Join-Path $hbTemp 'claude/codex-activity.json'
+
+        # Sin Start-, escribir no debe hacer nada: el heartbeat solo existe
+        # durante una delegacion real.
+        $script:CxHbFile = $null
+        Write-CodexHeartbeat -EventType 'reasoning'
+        Check (-not (Test-Path $hbFile)) 'Write-CodexHeartbeat no escribe nada fuera de una corrida'
+
+        Start-CodexHeartbeat -Role 'constructor' -Phase 'construct'
+        Check (Test-Path $hbFile) 'Start-CodexHeartbeat crea el archivo de actividad'
+        $hb = Get-Content -LiteralPath $hbFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        Check ($hb.role -eq 'constructor') 'el heartbeat guarda el rol'
+        Check ($hb.phase -eq 'construct') 'el heartbeat guarda la fase'
+        Check ($hb.items -eq 0) 'el heartbeat arranca con items en 0'
+
+        # Throttle: dos eventos seguidos escriben una sola vez, pero el contador
+        # de items se lleva igual -- si no, el conteo dependeria del reloj.
+        Write-CodexHeartbeat -EventType 'item_completed'
+        Write-CodexHeartbeat -EventType 'item_completed'
+        $hb2 = Get-Content -LiteralPath $hbFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        Check ($hb2.last_event -eq 'iniciando') 'el throttle saltea la escritura de eventos seguidos'
+        Write-CodexHeartbeat -EventType 'CommandExecution' -Force
+        $hb3 = Get-Content -LiteralPath $hbFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        Check ($hb3.last_event -eq 'CommandExecution') '-Force escribe aunque el throttle este activo'
+        Check ($hb3.items -eq 2) 'el contador de items suma aunque la escritura se saltee'
+
+        # Borrar el archivo es lo que hace desaparecer el segmento de la statusline.
+        Stop-CodexHeartbeat
+        Check (-not (Test-Path $hbFile)) 'Stop-CodexHeartbeat borra el archivo de actividad'
+        Stop-CodexHeartbeat
+        Check $true 'Stop-CodexHeartbeat dos veces no tira'
+    } finally {
+        $env:TEMP = $previousTempHb
+        if (Test-Path $hbTemp) { Remove-Item -LiteralPath $hbTemp -Recurse -Force }
+    }
+
+    # -LiveLog es opcional: sin el, Invoke-CodexCli conserva el contrato del que
+    # dependen `login status` y `debug models`.
+    $icParams = (Get-Command Invoke-CodexCli).Parameters
+    Check ($icParams.ContainsKey('LiveLog')) 'Invoke-CodexCli acepta -LiveLog'
+    Check (-not $icParams['LiveLog'].Attributes.Mandatory) 'el parametro -LiveLog es opcional'
+    $icSrc = (Get-Command Invoke-CodexCli).Definition
+    Check ($icSrc -match 'ReadLineAsync') 'con -LiveLog el stdout se consume linea a linea'
+    Check ($icSrc -match 'AutoFlush') 'el log vivo hace flush por linea (si no, no se puede tailear)'
+    Check ($icSrc -match 'UTF8Encoding\(\$false\)') 'el log vivo se escribe sin BOM'
+
+    # Runtime, con un proceso de verdad: el hijo escupe 2000 lineas ANTES de leer
+    # su stdin, y el padre le manda ~500 KB. Es la forma exacta del deadlock que
+    # encontro el reviewer: si el stdin se escribe sincronico antes de arrancar el
+    # bucle, nadie drena el stdout, el hijo se traba escribiendo, y como no lee mas
+    # stdin el padre se traba tambien. Con el write async + WaitAny, pasa.
+    $liveTemp = Join-Path $env:TEMP ("test-live-" + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Force -Path $liveTemp | Out-Null
+    $previousCmd = $CodexCmd
+    try {
+        $CodexCmd = (Get-Command powershell -ErrorAction SilentlyContinue).Source
+        if (-not $CodexCmd) { $CodexCmd = (Get-Command pwsh).Source }
+        $liveFile = Join-Path $liveTemp 'live.log'
+        $child = '1..2000 | ForEach-Object { ''{"type":"item_completed"}'' }; ' +
+                 '$i = [Console]::In.ReadToEnd(); Write-Output (''{"type":"len_'' + $i.Length + ''"}'')'
+        $big = 'x' * 500000
+
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        $r  = Invoke-CodexCli -CodexArgs @('-NoProfile','-Command',$child) `
+                              -TimeoutSec 60 -StdinText $big -LiveLog $liveFile
+        $sw.Stop()
+
+        Check ($r.ExitCode -eq 0) 'con -LiveLog y stdin grande el proceso termina (no deadlock)'
+        Check ($sw.Elapsed.TotalSeconds -lt 55) 'con -LiveLog y stdin grande no se agota el timeout'
+        Check ($r.Out -match 'len_500000') 'con -LiveLog el hijo recibe el stdin completo'
+        Check (Test-Path $liveFile) 'con -LiveLog se escribe el archivo de log'
+        if (Test-Path $liveFile) {
+            $logLines = @(Get-Content -LiteralPath $liveFile)
+            Check ($logLines.Count -ge 2001) 'el log vivo recibe todas las lineas del stdout'
+            Check ($r.Out.Split([char]10).Count -ge 2001) 'Out conserva todas las lineas ademas del log'
+        }
+
+        # Sin -LiveLog el contrato viejo sigue igual: mismo hijo, mismo resultado.
+        $r2 = Invoke-CodexCli -CodexArgs @('-NoProfile','-Command',$child) `
+                              -TimeoutSec 60 -StdinText $big
+        Check ($r2.ExitCode -eq 0) 'sin -LiveLog el contrato anterior sigue intacto'
+        Check ($r2.Out -match 'len_500000') 'sin -LiveLog el stdin completo tambien llega'
+    } finally {
+        $CodexCmd = $previousCmd
+        if (Test-Path $liveTemp) { Remove-Item -LiteralPath $liveTemp -Recurse -Force }
+    }
 }
 finally {
     if (Test-Path $testRoot) { Remove-Item -LiteralPath $testRoot -Recurse -Force }

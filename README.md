@@ -47,6 +47,11 @@ propios subagentes, nada más que sin la segunda cuota. Con Codex disponible, la
 ejecución mecánica y verificable se va a su cuota y la de Claude rinde varias veces
 más.
 
+**Cómo ver a Codex trabajando.** Una delegación tarda minutos. Mientras corre, la
+barra de estado muestra `CX> <rol> <tiempo> <último evento>` y desaparece al
+terminar; para mirar de cerca, `Get-Content -Wait "$env:TEMP\claude\codex-live.log"`
+sigue el stream en vivo.
+
 Para saber si tu instalación quedó atrás del repo,
 [`Orquestador/verify.ps1`](Orquestador/verify.ps1) compara por hash y nombra el
 archivo desactualizado. Detalle y versión manual:

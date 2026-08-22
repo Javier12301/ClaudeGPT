@@ -57,7 +57,7 @@ Estado: IN_PROGRESS. Ver
 ### Deuda conocida
 
 - `BR-001`, `BR-002` y `BR-003` están cubiertas por
-  `Orquestador/tests/test-codex-run.ps1` (91 checks, sin dependencias: mismo
+  `Orquestador/tests/test-codex-run.ps1` (119 checks, sin dependencias: mismo
   patrón `Check` que `codex/Orquestador/verify.ps1`) — 26 de ellos sobre la
   máquina de estados y 18 sobre la degradación sin Codex instalado, estos
   últimos en procesos hijo con el PATH limpio, que es la única forma de probar
@@ -92,16 +92,25 @@ sirve**: exige `--remote <ADDR>`, y tanto `codex remote-control start` como
 Unix platforms"*. Revisar en cada update del CLI; si algún día arranca en
 Windows, deja obsoleto el registry propio de abajo.
 
-- [ ] **Registry de jobs + `-Background` en `codex-run.ps1`.** Hoy el wrapper
-      bloquea (`WaitForExit`), así que no hay paralelismo real ni forma de ver
-      qué está corriendo. Escribir `.orquestador/jobs/<id>.json` + `<id>.log` al
-      lanzar, y un `codex-ps.ps1` que los tabule. Prioridad alta: es el único
-      camino a la observabilidad en Windows.
+- [x] **Señal de vida de Codex** (`D-015`). El wrapper vuelca el stream `--json`
+      a `$env:TEMP\claude\codex-live.log` línea a línea mientras corre, y publica
+      un heartbeat que la statusline muestra como `CX> <rol> <tiempo> <evento>`.
+      Resuelve el problema que motivaba el registry —saber si Codex sigue vivo—
+      sin tocar el protocolo de delegación.
+
+- [ ] **Registry de jobs + `-Background` en `codex-run.ps1`.** Diferido a
+      propósito (`D-015`): el wrapper sigue bloqueando. Lo que faltaba era la
+      señal de vida, ya cubierta arriba; `-Background` solo hace falta el día que
+      moleste no poder seguir hablando con Claude mientras Codex trabaja, o que
+      se quiera paralelismo real. Diseño si llega ese día:
+      `.orquestador/jobs/<id>.json` + `<id>.log` al lanzar, y un `codex-ps.ps1`
+      que los tabule.
       Referencia de diseño: `openai/codex-plugin-cc`, `scripts/lib/state.mjs` y
       `scripts/lib/tracked-jobs.mjs` (jobs dir por workspace, hash del root).
-- [ ] **Contador de jobs en la statusline.** Depende del registry. El segmento
-      `CX <n>%` ya está (`statusline-wrapper.ps1`, cache TTL 60s vía
-      `codex-run.ps1 -QuotaCache`); falta sumarle `· N jobs`.
+- [ ] **Contador de jobs en la statusline.** Depende del registry, o sea de
+      `-Background`: con el wrapper bloqueante nunca hay más de un job. El
+      segmento de cuota `CX <n>%` y el de actividad `CX> <rol> …` ya están en
+      `statusline-wrapper.ps1`.
 - [x] **Instalador one-shot.** `install-hibrido.ps1` ramifica según
       `codex login status`: con sesión de ChatGPT instala los dos kits, sin ella
       instala solo el lado Claude y dice qué falta. `Orquestador/install.ps1` y
