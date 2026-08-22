@@ -17,8 +17,8 @@ propio en este flujo: es capacidad delegada.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — qué falta y en qué estado está.
 - [`CHANGELOG.md`](CHANGELOG.md) — historia observable de cambios.
 - [`INSTALL-HIBRIDO.md`](INSTALL-HIBRIDO.md) — instalación del entorno completo.
-  Si ya lo tenías instalado y solo querés la versión nueva:
-  [§ 7.1 Actualizar desde una versión anterior](INSTALL-HIBRIDO.md#71-actualizar-desde-una-versión-anterior-a-las-skills-de-documentación).
+  Actualizar es volver a correr el mismo instalador:
+  [§ 7 Actualizar y desinstalar](INSTALL-HIBRIDO.md#7-actualizar-y-desinstalar).
 - [`Orquestador/INSTALL.md`](Orquestador/INSTALL.md) — instalación solo del kit
   Claude.
 
@@ -30,14 +30,27 @@ Le decís a Claude Code: *"Trabajá como Orquestador"*. A partir de ahí, es la
 única interfaz: decide, delega a Codex cuando conviene, y arbitra el resultado
 antes de entregarlo.
 
-Para instalar el entorno completo desde cero:
+Para instalar el entorno completo desde cero, o para actualizarlo — es el mismo
+comando:
 
 ```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-hibrido.ps1 -WhatIf   # ver que haria
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install-hibrido.ps1
 ```
 
 Ramifica solo según tengas Codex autenticado o no, respalda antes de pisar nada y
-termina verificando. Detalle y versión manual: [INSTALL-HIBRIDO.md](INSTALL-HIBRIDO.md).
+termina verificando.
+
+**Codex es opcional.** Sin `codex` instalado o sin autenticar, se instala solo el
+kit Claude y el gate enruta a `CLAUDE-LEAD`: el orquestador sigue delegando a sus
+propios subagentes, nada más que sin la segunda cuota. Con Codex disponible, la
+ejecución mecánica y verificable se va a su cuota y la de Claude rinde varias veces
+más.
+
+Para saber si tu instalación quedó atrás del repo,
+[`Orquestador/verify.ps1`](Orquestador/verify.ps1) compara por hash y nombra el
+archivo desactualizado. Detalle y versión manual:
+[INSTALL-HIBRIDO.md](INSTALL-HIBRIDO.md).
 
 ---
 

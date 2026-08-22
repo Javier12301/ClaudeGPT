@@ -490,3 +490,51 @@ Colapsarlas obligaría a reescribir BR-001 y BR-002 sin ganar nada.
 
 ### Referencias
 SYSTEM.md § 2 BR-003 · D-012 (el lead sí puede ser Sonnet; el subagente no)
+
+---
+
+## D-014 — `pwsh` 7 como runtime declarada, en vez de portar a bash
+
+Estado: Aceptada
+Fecha: 2026-08-22
+
+### Contexto
+El kit son ~1500 líneas de PowerShell escritas contra 5.1 en Windows. Surgieron
+dos necesidades a la vez: Serena no podía levantar su language server de
+PowerShell (necesita `pwsh` 7+), y el entorno podía tener que correr fuera de
+Windows.
+
+### Opciones consideradas
+A. Portar los scripts a bash y mantener las dos versiones.
+B. Declarar `pwsh` 7 como runtime del kit y neutralizar rutas y lanzadores.
+C. Dejarlo Windows-only y documentarlo.
+
+### Decisión
+B. PowerShell 5.1 sigue siendo el piso soportado en Windows.
+
+### Motivo
+`pwsh` 7 corre nativo en Linux y macOS, así que resuelve la portabilidad sin
+reescribir nada ni duplicar el mantenimiento — y de paso destraba Serena, que era
+un requisito independiente. A duplica la superficie de bugs por una plataforma que
+todavía no se usa.
+
+Lo que impedía correr fuera de Windows no era el lenguaje sino seis puntos
+concretos: `$env:USERPROFILE`, `$env:TEMP`, separadores `\` literales,
+`-ExecutionPolicy` (que no existe fuera de Windows), el nombre del ejecutable del
+host, y `Start-Process -WindowStyle`. Se neutralizaron todos.
+
+### Consecuencias
++ Serena resuelve símbolos sobre los `.ps1` del kit.
++ El instalador escribe el lanzador correcto según plataforma.
++ `verify.ps1` avisa si falta `pwsh`.
+- **Linux y macOS no están probados.** Se quitaron los impedimentos conocidos;
+  que funcione es una hipótesis, no un hecho verificado. Anotado en ROADMAP.
+- El cache de cuota de Claude lo escribe el repo upstream `ClaudeCodeStatusLine`
+  usando `$env:TEMP`, que fuera de Windows no existe. En esas plataformas esa
+  mitad del gate queda ciega y degrada a `BALANCED`, que es la degradación ya
+  documentada en BR-003 — no un modo de falla nuevo.
+- `$IsWindows` no existe en PowerShell 5.1 (vale `$null`), así que la condición de
+  plataforma es siempre `($null -eq $IsWindows -or $IsWindows)`.
+
+### Referencias
+SYSTEM.md § 2 BR-001 · INSTALL-HIBRIDO.md § 1

@@ -44,14 +44,17 @@ ejecución delegada vía `Orquestador/scripts/codex-run.ps1`.
 
 ### Presupuesto y routing
 
-#### BR-001 — NO-GO por cuota agotada
+#### BR-001 — NO-GO por cuota agotada o por Codex ausente
 
 Codex con menos de 10% libre, o con `spendControlReached`, produce veredicto
-NO-GO.
+NO-GO. **Codex no instalado en la máquina produce el mismo NO-GO**, con una razón
+propia que lo distingue del WARN de "`app-server` no responde": no es lo mismo que
+Codex no conteste a que Codex no exista. La rama se evalúa antes de leer cuota
+alguna, y el kit sigue funcionando en modo Claude-solo — el gate nunca bloquea.
 
 Estado: Activa
-Test: —
-Código: `Orquestador/scripts/codex-run.ps1` — `$MinFreePercent`, `Get-CodexVerdict`
+Test: `Orquestador/tests/test-codex-run.ps1` — checks de degradación sin codex
+Código: `Orquestador/scripts/codex-run.ps1` — `$MinFreePercent`, `Get-CodexCommand`, `Get-CodexVerdict`
 
 #### BR-002 — Umbrales de veredicto
 
@@ -69,6 +72,7 @@ Código: `Orquestador/scripts/codex-run.ps1` — `$CODEX_WARN_FREE`, `$CODEX_HEA
 | 10–20% | WARN — solo si se pide explícitamente |
 | < 10% | **NO-GO** — Codex descartado, Claude-only |
 | `spendControlReached` | **NO-GO** duro |
+| `codex` ausente del PATH | **NO-GO** duro — kit en modo Claude-solo |
 
 #### BR-003 — Estado de capacidad
 

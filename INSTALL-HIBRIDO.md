@@ -58,11 +58,26 @@ hace cada paso y por qué.
 ## 1. Prerequisitos
 
 ```powershell
-claude --version      # probado con 2.1.237
-codex  --version      # probado con 0.147.0
+claude --version      # probado con 2.1.240
+codex  --version      # probado con 0.149.0
 git    --version
+pwsh   --version      # PowerShell 7+ — ver abajo
 node   --version      # solo para los MCP de navegador
 ```
+
+`pwsh` 7 es la runtime declarada del kit ([`D-014`](docs/DECISIONS.md)). En Windows
+PowerShell 5.1 sigue alcanzando para correr todo, pero `pwsh` hace falta igual por
+dos motivos: es lo que permite que el kit corra fuera de Windows, y es lo que
+**Serena** necesita para levantar su language server de PowerShell — sin él, sus
+herramientas de símbolos fallan en cualquier repo que declare ese LS.
+
+```powershell
+winget install --id Microsoft.PowerShell -e
+```
+
+Después de instalarlo hay que **reabrir Claude Code**: los servidores MCP heredan
+el PATH del proceso que los lanzó, así que Serena no lo ve hasta la sesión
+siguiente.
 
 Ambos CLIs autenticados con **suscripción**, no con API key:
 
@@ -248,8 +263,26 @@ powershell -File "$env:USERPROFILE\.claude\scripts\codex-run.ps1" -Role verifier
 
 ## 7. Actualizar y desinstalar
 
-**Actualizar el kit**: copiá la versión nueva y repetí los pasos 2–4. Del lado
-Codex, `.\install.ps1` deja backup en `~/.codex/orquestador-backups\`.
+**Actualizar el kit**: `git pull` y volvé a correr el instalador. Es la misma
+operación que instalar — respalda todo antes de pisar y no duplica hooks ni
+permisos.
+
+```powershell
+git pull
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-hibrido.ps1 -WhatIf
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-hibrido.ps1
+```
+
+**Para saber si hace falta**, corré la verificación: compara por hash lo instalado
+en `~/.claude` contra el repo y marca en FAIL cada archivo que quedó atrás.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Orquestador\verify.ps1
+```
+
+Los respaldos quedan en `~/.claude/orquestador-backups\<timestamp>` y
+`~/.codex/orquestador-backups\<timestamp>`. **Nada los borra**: si molestan, se
+limpian a mano.
 
 **Actualizar los CLIs**: `codex update`. Hacelo *después* de que los smoke tests
 pasen, para no cambiar la base bajo los pies.
@@ -362,6 +395,25 @@ El actual escribe bytes UTF-8 directo al stream (.NET Framework no tiene
 
 **"Output schema file is not valid JSON".** Ídem: `Set-Content -Encoding UTF8`
 escribe BOM en PS 5.1. El wrapper actual usa `UTF8Encoding($false)`.
+
+**Instalar `pwsh` 7 rompe cmdlets de PowerShell 5.1.** El instalador de
+PowerShell 7 antepone sus módulos al `PSModulePath` de la máquina. Cuando arranca
+**5.1**, resuelve `Microsoft.PowerShell.Utility` de la 7.x y algunos cmdlets dejan
+de existir — `Get-FileHash` es el caso confirmado:
+
+```powershell
+powershell -NoProfile -Command "Get-Command Get-FileHash"   # CommandNotFoundException
+```
+
+El kit no depende de ninguno: la detección de deriva usa SHA256 por .NET, que no
+pasa por el autoload de módulos. Pero si tenés scripts propios en 5.1 que sí lo
+usan, el diagnóstico es este, no una instalación corrupta. Comprobación:
+
+```powershell
+powershell -NoProfile -Command "$env:PSModulePath = 'C:\WINDOWS\system32\WindowsPowerShell\v1.0\Modules'; Get-Command Get-FileHash"
+```
+
+Si ahí aparece, el `PSModulePath` es la causa.
 
 **Codex reporta que no puede ejecutar Python.** El sandbox puede denegar los
 intérpretes instalados desde la Microsoft Store (`WindowsApps\python.exe`). Instalá

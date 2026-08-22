@@ -100,10 +100,10 @@ function Get-CodexCommand {
         $c = Get-Command $n -ErrorAction SilentlyContinue
         if ($c) { return $c.Source }
     }
-    throw "No se encontro el ejecutable de codex en el PATH."
+    return $null
 }
 $CodexCmd  = Get-CodexCommand
-$CodexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
+$CodexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }
 
 # PowerShell 5.1 corre sobre .NET Framework, que NO tiene ProcessStartInfo.ArgumentList
 # (es de .NET Core 2.1+). Hay que armar la linea de comandos a mano con el quoting
@@ -118,6 +118,7 @@ function ConvertTo-CmdArg([string]$a) {
 
 function Invoke-CodexCli {
     param([string[]]$CodexArgs, [int]$TimeoutSec = 900, [string]$StdinText)
+    if (-not $CodexCmd) { throw 'codex no esta en el PATH.' }
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName  = $CodexCmd
     $psi.Arguments = (($CodexArgs | ForEach-Object { ConvertTo-CmdArg $_ }) -join ' ')
@@ -151,6 +152,7 @@ function Invoke-CodexCli {
 
 function Get-CodexQuota {
     # JSON-RPC por stdio contra `codex app-server`, metodo account/rateLimits/read.
+    if (-not $CodexCmd) { return $null }
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName  = $CodexCmd
     $psi.Arguments = 'app-server'
@@ -191,7 +193,7 @@ function Get-CodexQuota {
 
 function Get-ClaudeQuota {
     # La statusline refresca este cache en cada turno (TTL 60s). Ver INSTALL.md 4.5.
-    $f = Join-Path $env:TEMP 'claude\statusline-usage-cache.json'
+    $f = Join-Path $(if ($env:TEMP) { $env:TEMP } else { [IO.Path]::GetTempPath() }) 'claude/statusline-usage-cache.json'
     if (-not (Test-Path $f)) { return $null }
     try { return (Get-Content $f -Raw -Encoding UTF8 | ConvertFrom-Json) } catch { return $null }
 }
@@ -223,8 +225,6 @@ function Format-Epoch($e) {
 # Capa 1: "se puede usar Codex, y para que". Devuelve GO / WARN / NO-GO.
 # No sabe nada del estado de Claude: eso es la capa 2, mas abajo.
 function Get-CodexVerdict {
-    $res = Get-CodexQuota
-    $cx  = if ($res) { $res.rateLimits } else { $null }
     $cl  = Get-ClaudeQuota
 
     $r = [ordered]@{
@@ -239,6 +239,15 @@ function Get-CodexVerdict {
         $r.ClaudeSevenDayUsed = $cl.seven_day.utilization
         $r.ClaudeReset        = $cl.five_hour.resets_at
     }
+
+    if (-not $CodexCmd) {
+        $r.Decision = 'NO-GO'
+        $r.Reason   = 'Codex no esta instalado en el PATH.'
+        return $r
+    }
+
+    $res = Get-CodexQuota
+    $cx  = if ($res) { $res.rateLimits } else { $null }
 
     if (-not $cx) {
         $r.Decision = 'WARN'
@@ -394,7 +403,7 @@ function Resolve-Model {
 # El kit Codex sigue siendo la fuente de verdad de las instrucciones de rol.
 
 function Get-RoleConfig([string]$RoleName) {
-    $f = Join-Path $CodexHome "agents\$RoleName.toml"
+    $f = Join-Path $CodexHome "agents/$RoleName.toml"
     if (-not (Test-Path $f)) { throw "Falta el rol '$RoleName' en $f. Instalaste el kit Codex?" }
     $raw = Get-Content $f -Raw -Encoding UTF8
 
@@ -447,7 +456,7 @@ function New-SchemaFile([string]$Kind) {
                "source":{"type":"string"},"implication":{"type":"string"}}}
 '@
     $body = switch ($Kind) { 'impl' { $impl } 'review' { $review } 'docs' { $docs } }
-    $p = Join-Path $env:TEMP ("codex-schema-$Kind-" + [guid]::NewGuid().ToString('N').Substring(0,8) + ".json")
+    $p = Join-Path ([IO.Path]::GetTempPath()) ("codex-schema-$Kind-" + [guid]::NewGuid().ToString('N').Substring(0,8) + ".json")
     # Sin BOM: Set-Content -Encoding UTF8 en PS 5.1 lo agrega y codex rechaza el
     # schema con "not valid JSON: expected value at line 1 column 1".
     [System.IO.File]::WriteAllText($p, $body, (New-Object System.Text.UTF8Encoding($false)))
@@ -526,7 +535,7 @@ if ($QuotaCache) {
         plan      = if ($rl) { $rl.planType } else { $null }
         resets_at = if ($rl -and $rl.primary) { Format-Epoch $rl.primary.resetsAt } else { 'n/d' }
     }
-    $dir = Join-Path $env:TEMP 'claude'
+    $dir = Join-Path $(if ($env:TEMP) { $env:TEMP } else { [IO.Path]::GetTempPath() }) 'claude'
     if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
     [System.IO.File]::WriteAllText((Join-Path $dir 'codex-usage-cache.json'),
                                    ($out | ConvertTo-Json -Compress),
@@ -562,6 +571,11 @@ if ($SessionInfo) {
 if (-not $Role -and -not $Resume) {
     Write-Output "Uso: -BudgetOnly | -SessionInfo <id> | -Role <rol> -PromptFile <f> | -Resume <id> -Prompt <txt>"
     exit 6
+}
+
+if (-not $CodexCmd) {
+    Write-Output 'Codex no esta instalado en el PATH.'
+    exit 5
 }
 
 # --- prompt ---
@@ -612,7 +626,7 @@ $roleCfg = Get-RoleConfig $Role
 $tier    = $RoleTier[$Role]
 $model   = Resolve-Model -Tier $tier -Effort $roleCfg.Effort
 $schema  = New-SchemaFile $RoleSchema[$Role]
-$outFile = Join-Path $env:TEMP ("codex-last-" + [guid]::NewGuid().ToString('N').Substring(0,8) + ".txt")
+$outFile = Join-Path ([IO.Path]::GetTempPath()) ("codex-last-" + [guid]::NewGuid().ToString('N').Substring(0,8) + ".txt")
 
 Write-Output ("Rol: {0} | modelo: {1} ({2}/{3}) | sandbox: {4}" -f $Role, $model.Slug, $tier, $model.Effort, $roleCfg.Sandbox)
 

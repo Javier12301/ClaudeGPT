@@ -57,9 +57,11 @@ Estado: IN_PROGRESS. Ver
 ### Deuda conocida
 
 - `BR-001`, `BR-002` y `BR-003` están cubiertas por
-  `Orquestador/tests/test-codex-run.ps1` (73 checks, sin dependencias: mismo
+  `Orquestador/tests/test-codex-run.ps1` (91 checks, sin dependencias: mismo
   patrón `Check` que `codex/Orquestador/verify.ps1`) — 26 de ellos sobre la
-  máquina de estados. La suite se validó con mutación: mover cualquiera de los
+  máquina de estados y 18 sobre la degradación sin Codex instalado, estos
+  últimos en procesos hijo con el PATH limpio, que es la única forma de probar
+  algo que fallaba al cargar el script. La suite se validó con mutación: mover cualquiera de los
   seis umbrales, reordenar dos reglas de precedencia o romper el quoting de
   `ConvertTo-CmdArg` la pone en RED. **`BR-004`…`BR-008` siguen sin verificar**;
   `BR-008` es criterio del orquestador y no es verificable contra código.
@@ -69,6 +71,13 @@ Estado: IN_PROGRESS. Ver
   mutación (mover cualquiera pone la suite en RED).
 - El wrapper no rechaza explícitamente los flags de bypass: simplemente nunca
   los incluye. No hay guard si alguien los agregara.
+- **Linux y macOS no están probados** (`D-014`). El kit declara `pwsh` 7 como
+  runtime y se neutralizaron los seis puntos que asumían Windows, pero nadie corrió
+  el instalador, el hook, la statusline ni las suites fuera de Windows. Además el
+  cache de cuota de Claude lo escribe upstream con `$env:TEMP`, que fuera de
+  Windows no existe: esa mitad del gate degradaría a `BALANCED`.
+- Los respaldos del instalador se acumulan sin límite, un directorio por corrida en
+  `~/.claude/orquestador-backups/`. Nada los borra.
 
 ## Fase 3 — Observabilidad de Codex e instalador
 

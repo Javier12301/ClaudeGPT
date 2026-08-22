@@ -23,9 +23,9 @@ param(
 $ErrorActionPreference = 'Stop'
 $Utf8NoBom      = New-Object System.Text.UTF8Encoding($false)
 $KitRoot        = $PSScriptRoot
-$ClaudeHome     = if ($env:CLAUDE_HOME) { $env:CLAUDE_HOME } else { Join-Path $env:USERPROFILE '.claude' }
+$ClaudeHome     = if ($env:CLAUDE_HOME) { $env:CLAUDE_HOME } else { Join-Path $HOME '.claude' }
 $Stamp          = Get-Date -Format 'yyyyMMdd-HHmmss'
-$BackupRoot     = Join-Path $ClaudeHome "orquestador-backups\$Stamp"
+$BackupRoot     = Join-Path $ClaudeHome "orquestador-backups/$Stamp"
 $StatusLineRepo = 'https://github.com/daniel3303/ClaudeCodeStatusLine'
 
 function Assert-Command {
@@ -79,14 +79,28 @@ function Merge-StringArray($Existing, $Incoming) {
 function Merge-Settings {
     $target  = Join-Path $ClaudeHome 'settings.json'
     $snippet = Get-Content -LiteralPath (Join-Path $KitRoot 'settings-snippet.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    $runner = if ($null -eq $IsWindows -or $IsWindows) {
+        'powershell -NoProfile -ExecutionPolicy Bypass -File'
+    } else { 'pwsh -NoProfile -File' }
+    Set-Prop $snippet.statusLine 'command' "$runner ~/.claude/statusline-wrapper.ps1"
+    Set-Prop $snippet.hooks.PreToolUse[0].hooks[0] 'command' "$runner ~/.claude/hooks/git-guard.ps1"
+    $snippet.permissions.allow = @("Bash($runner ~/.claude/scripts/codex-run.ps1:*)")
     Backup-ItemIfPresent $target
 
     $doc = if (Test-Path -LiteralPath $target) {
         Get-Content -LiteralPath $target -Raw -Encoding UTF8 | ConvertFrom-Json
     } else { [pscustomobject]@{} }
 
-    foreach ($k in @('includeCoAuthoredBy', 'statusLine', 'model', 'effortLevel', 'attribution')) {
+    foreach ($k in @('includeCoAuthoredBy', 'statusLine', 'attribution')) {
         if ($snippet.PSObject.Properties.Name -contains $k) { Set-Prop $doc $k $snippet.$k }
+    }
+
+    # model y effortLevel se siembran, no se imponen: el propio kit recomienda
+    # /model sonnet en el estado SONNET-LEAD, y reinstalar no puede revertir esa
+    # eleccion. Mismo trato que permissions.defaultMode, mas abajo.
+    foreach ($k in @('model', 'effortLevel')) {
+        if (($snippet.PSObject.Properties.Name -contains $k) -and
+            -not ($doc.PSObject.Properties.Name -contains $k)) { Set-Prop $doc $k $snippet.$k }
     }
 
     # permissions: deny y allow se fusionan; defaultMode solo si no estaba.
@@ -128,7 +142,7 @@ function Merge-Settings {
 }
 
 Assert-Command git | Out-Null
-Assert-Command powershell | Out-Null
+Assert-Command $(if ($null -eq $IsWindows -or $IsWindows) { 'powershell' } else { 'pwsh' }) | Out-Null
 $hasClaude = Assert-Command claude -Optional
 if (-not $hasClaude) {
     Write-Warning "'claude' no esta en PATH: el kit se copia igual, pero no se puede verificar la CLI."
@@ -138,7 +152,7 @@ New-Item -ItemType Directory -Force $ClaudeHome | Out-Null
 
 # --- skills, agents, wrapper y hook ---
 foreach ($skill in Get-ChildItem -LiteralPath (Join-Path $KitRoot 'skills') -Directory) {
-    $destination = Join-Path $ClaudeHome "skills\$($skill.Name)"
+    $destination = Join-Path $ClaudeHome "skills/$($skill.Name)"
     Backup-ItemIfPresent $destination
     if ($PSCmdlet.ShouldProcess($destination, "Instalar skill $($skill.Name)")) {
         New-Item -ItemType Directory -Force (Join-Path $ClaudeHome 'skills') | Out-Null
@@ -146,10 +160,10 @@ foreach ($skill in Get-ChildItem -LiteralPath (Join-Path $KitRoot 'skills') -Dir
     }
 }
 foreach ($agent in Get-ChildItem -LiteralPath (Join-Path $KitRoot 'agents') -Filter '*.md') {
-    Copy-OwnedFile $agent.FullName (Join-Path $ClaudeHome "agents\$($agent.Name)")
+    Copy-OwnedFile $agent.FullName (Join-Path $ClaudeHome "agents/$($agent.Name)")
 }
-Copy-OwnedFile (Join-Path $KitRoot 'scripts\codex-run.ps1')  (Join-Path $ClaudeHome 'scripts\codex-run.ps1')
-Copy-OwnedFile (Join-Path $KitRoot 'hooks\git-guard.ps1')    (Join-Path $ClaudeHome 'hooks\git-guard.ps1')
+Copy-OwnedFile (Join-Path $KitRoot 'scripts/codex-run.ps1')  (Join-Path $ClaudeHome 'scripts/codex-run.ps1')
+Copy-OwnedFile (Join-Path $KitRoot 'hooks/git-guard.ps1')    (Join-Path $ClaudeHome 'hooks/git-guard.ps1')
 Copy-OwnedFile (Join-Path $KitRoot 'statusline-wrapper.ps1') (Join-Path $ClaudeHome 'statusline-wrapper.ps1')
 
 Merge-Settings
@@ -167,6 +181,7 @@ if ($SkipStatusLine) {
 
 # --- lo que este script deliberadamente NO ejecuta ---
 $pending = New-Object System.Collections.Generic.List[string]
+$snippet = Get-Content -LiteralPath (Join-Path $KitRoot 'settings-snippet.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $mcpList = if ($hasClaude) { (& claude mcp list 2>&1 | Out-String) } else { '' }
 foreach ($mcp in @(
     @{ Name = 'context7'; Cmd = 'claude mcp add --scope user context7 -- npx -y @upstash/context7-mcp@latest' },
@@ -174,13 +189,22 @@ foreach ($mcp in @(
 )) {
     if ($mcpList -notmatch [regex]::Escape($mcp.Name)) { $pending.Add("MCP $($mcp.Name): $($mcp.Cmd)") }
 }
-$pending.Add('Plugins, desde una sesion de Claude Code: /plugin marketplace add Gentleman-Programming/engram  +  /plugin install engram@engram  +  /plugin marketplace add DietrichGebert/ponytail  +  /plugin install ponytail@ponytail')
+# Los plugins se declaran en settings.json y Claude Code clona el marketplace al
+# arrancar. Solo los listamos si el clon todavia no esta: pedir algo que ya se
+# hizo es la forma mas rapida de que se dejen de leer estas lineas.
+foreach ($mk in $snippet.extraKnownMarketplaces.PSObject.Properties) {
+    if (-not (Test-Path (Join-Path $ClaudeHome "plugins/marketplaces/$($mk.Name)"))) {
+        $pending.Add("Plugin $($mk.Name), desde una sesion de Claude Code: /plugin marketplace add $($mk.Value.source.repo)  +  /plugin install $($mk.Name)@$($mk.Name)")
+    }
+}
 
 Write-Host ''
 Write-Host "Kit Claude instalado en $ClaudeHome" -ForegroundColor Green
 if (Test-Path $BackupRoot) { Write-Host "Respaldos en $BackupRoot" }
-Write-Host ''
-Write-Host 'Falta ejecutar a mano (no se hace a ciegas):' -ForegroundColor Yellow
-foreach ($p in $pending) { Write-Host "  - $p" }
+if ($pending.Count) {
+    Write-Host ''
+    Write-Host 'Falta ejecutar a mano (no se hace a ciegas):' -ForegroundColor Yellow
+    foreach ($p in $pending) { Write-Host "  - $p" }
+}
 Write-Host ''
 Write-Host 'Verificar con: powershell -NoProfile -ExecutionPolicy Bypass -File .\Orquestador\verify.ps1'

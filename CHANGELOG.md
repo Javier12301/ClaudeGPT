@@ -9,6 +9,27 @@ correspondiente de [`docs/SYSTEM.md`](docs/SYSTEM.md) en el mismo diff.
 
 ### Added
 
+- **Modo Claude-solo de verdad.** Sin `codex` instalado, el gate devuelve NO-GO
+  con una razón propia —distinta del WARN de "`app-server` no responde"— y el
+  orquestador enruta a `CLAUDE-LEAD`. Antes el wrapper tiraba una excepción al
+  cargar y se llevaba puestos `-BudgetOnly`, `-QuotaCache` y la suite de tests: el
+  modo se prometía en el README y nunca había funcionado.
+
+- **Detección de actualización en `verify.ps1`.** Compara por hash lo instalado en
+  `~/.claude` contra este repo y nombra el archivo desactualizado más el comando
+  de reinstalación. Actualizar es volver a correr el instalador; esto es lo que
+  avisa cuándo hace falta.
+
+- **Chequeos de plugins y de `pwsh`.** `verify.ps1` avisa si falta el clon de un
+  marketplace (con el `/plugin marketplace add` exacto) y si falta `pwsh` 7, que
+  es lo que Serena necesita para resolver símbolos sobre archivos `.ps1`.
+
+- **`pwsh` 7 como runtime declarada (`D-014`).** Rutas y lanzadores dejaron de
+  asumir Windows: `$HOME` en vez de `$env:USERPROFILE`, separadores neutros, y el
+  instalador escribe `powershell … -ExecutionPolicy Bypass -File` en Windows o
+  `pwsh -NoProfile -File` fuera. **Linux y macOS no están probados**: se quitaron
+  los impedimentos conocidos, nada más.
+
 - **Estado de capacidad en el gate de presupuesto.** `-BudgetOnly` ahora imprime
   un estado nombrado —`BALANCED`, `CODEX-PREFERRED`, `SONNET-LEAD`,
   `CLAUDE-LEAD`, `SURVIVAL`— además del veredicto de siempre. Son dos capas que
@@ -132,6 +153,29 @@ correspondiente de [`docs/SYSTEM.md`](docs/SYSTEM.md) en el mismo diff.
   dos puntos de retroceso.
 
 ### Fixed
+
+- **El instalador ya no revierte el `model` del usuario.** `model` y `effortLevel`
+  se siembran si faltan y no se pisan si ya están. Antes cada reinstalación volvía
+  a `opus`, deshaciendo el `/model sonnet` que el propio kit recomienda en el
+  estado `SONNET-LEAD`.
+
+- **El instalador dejó de pedir plugins que ya están instalados.** Chequea el clon
+  del marketplace, igual que ya hacía con los MCPs.
+
+- **`codex login status` escribe en stderr aunque todo esté bien**, y con
+  `ErrorActionPreference = Stop` PowerShell lo pintaba como `NativeCommandError`:
+  una instalación sana parecía rota.
+
+- **La detección de deriva no usa `Get-FileHash`.** Instalar `pwsh` 7 antepone sus
+  módulos al `PSModulePath` de la máquina, y PowerShell 5.1 pasa a resolver la
+  `Microsoft.PowerShell.Utility` de la 7.x, donde `Get-FileHash` deja de estar
+  disponible. Se usa SHA256 por .NET, que no pasa por el autoload de módulos.
+  `test-install-merge.ps1` corre `verify.ps1` entero para que un cmdlet que se
+  evapora vuelva a ser un FAIL y no un instalador que muere a mitad.
+
+- **`test-install-merge.ps1` filtraba `$env:CLAUDE_HOME`** al shell que corría la
+  suite. Ahora lo restaura en un `finally`, como ya hacía `test-codex-run.ps1` con
+  `CODEX_HOME`.
 
 - **`git push` era evadible en ambos entornos.** `git -C . push origin main` y
   `git --git-dir=.git push` no matcheaban ni la deny rule de Claude

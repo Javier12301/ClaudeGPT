@@ -41,7 +41,7 @@ function Invoke-Installer {
 }
 
 # --- lado Claude: siempre ---
-Invoke-Installer (Join-Path $Root 'Orquestador\install.ps1')
+Invoke-Installer (Join-Path $Root 'Orquestador/install.ps1')
 
 # --- lado Codex: solo con sesion de ChatGPT ---
 $codexReady = $false
@@ -51,12 +51,18 @@ if ($ClaudeOnly) {
 } elseif (-not (Get-Command codex -ErrorAction SilentlyContinue)) {
     Write-Warning "'codex' no esta en PATH. Se instalo solo el kit Claude."
 } else {
-    $status = (& codex login status 2>&1 | Out-String)
+    # Ojo: `codex login status` escribe en stderr incluso cuando todo esta bien, y
+    # con ErrorActionPreference=Stop PowerShell lo pinta como NativeCommandError.
+    # Una instalacion sana no puede parecer rota.
+    $status = & {
+        $ErrorActionPreference = 'Continue'
+        (& codex login status 2>&1 | Out-String)
+    }
     # El wrapper nunca cae a API key: cambiaria el modelo de facturacion sin que
     # lo pidas. Por eso se exige sesion de ChatGPT, no cualquier credencial.
     if ($status -match '(?i)ChatGPT') {
         $codexReady = $true
-        Invoke-Installer (Join-Path $Root 'codex\Orquestador\install.ps1') @{
+        Invoke-Installer (Join-Path $Root 'codex/Orquestador/install.ps1') @{
             WithSerena = [bool]$WithSerena; WithSecurity = [bool]$WithSecurity
         }
     } else {
@@ -71,8 +77,8 @@ Write-Host '=== Verificacion ===' -ForegroundColor Cyan
 if ($WhatIfPreference) {
     Write-Host '(-WhatIf: no se verifica nada, no se instalo nada)'
 } else {
-    & (Join-Path $Root 'Orquestador\verify.ps1')
-    if ($codexReady) { & (Join-Path $Root 'codex\Orquestador\verify.ps1') -Global }
+    & (Join-Path $Root 'Orquestador/verify.ps1')
+    if ($codexReady) { & (Join-Path $Root 'codex/Orquestador/verify.ps1') -Global }
 }
 
 Write-Host ''

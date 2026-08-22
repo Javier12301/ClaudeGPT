@@ -19,6 +19,36 @@ $env:CODEX_HOME = $testRoot # CodexHome is resolved while codex-run.ps1 is dot-s
 try {
     . (Join-Path $PSScriptRoot '..\scripts\codex-run.ps1')
 
+    # ------------------------- degradacion sin codex instalado (en proceso) ---
+    # Get-CodexCommand debe devolver null en vez de tirar cuando codex no esta
+    # en el PATH: hoy hace throw a nivel de script y mata -BudgetOnly, -QuotaCache
+    # y hasta el dot-source de esta misma suite.
+    $previousPathForNoCodex = $env:PATH
+    $env:PATH = 'C:\Windows\System32'
+    try {
+        $threw = $false
+        $cmdResult = 'unset'
+        try { $cmdResult = Get-CodexCommand } catch { $threw = $true }
+        Check ((-not $threw) -and ($null -eq $cmdResult)) 'Get-CodexCommand devuelve null en vez de tirar cuando codex no esta en el PATH'
+    } finally {
+        $env:PATH = $previousPathForNoCodex
+    }
+
+    # Get-CodexQuota no debe intentar lanzar el proceso cuando CodexCmd es null.
+    # Proxy observable: hoy Process.Start con FileName vacio tira una excepcion
+    # .NET que SI queda registrada en $Error aunque el catch la absorba; con el
+    # guard nuevo la funcion vuelve antes de tocar ProcessStartInfo y $Error
+    # queda limpio.
+    $previousCodexCmdForQuota = $script:CodexCmd
+    $script:CodexCmd = $null
+    $Error.Clear()
+    $quotaResult = 'unset'
+    $quotaThrew = $false
+    try { $quotaResult = Get-CodexQuota } catch { $quotaThrew = $true }
+    Check ((-not $quotaThrew) -and ($null -eq $quotaResult)) 'Get-CodexQuota devuelve null cuando CodexCmd es null'
+    Check ($Error.Count -eq 0) 'Get-CodexQuota no intenta lanzar el proceso cuando CodexCmd es null'
+    $script:CodexCmd = $previousCodexCmdForQuota
+
     Check ((ConvertTo-CmdArg '') -eq '""') 'ConvertTo-CmdArg quotes an empty argument'
     Check ((ConvertTo-CmdArg 'abc') -eq 'abc') 'ConvertTo-CmdArg leaves a simple argument unquoted'
     Check ((ConvertTo-CmdArg 'a b') -eq '"a b"') 'ConvertTo-CmdArg quotes an argument with whitespace'
@@ -40,6 +70,29 @@ try {
     $script:TestClaudeQuota = $null
     function Get-CodexQuota { return $script:TestCodexQuota }
     function Get-ClaudeQuota { return $script:TestClaudeQuota }
+
+    # ------------------------- degradacion sin codex instalado: veredicto ---
+    # Rama propia y distinta del WARN "no se pudo leer la cuota": el NO-GO por
+    # falta de binario tiene que ganarle incluso a una cuota que leeria GO, para
+    # probar que la prioridad es la correcta y no una coincidencia con el mock.
+    $previousCodexCmdForVerdict = $script:CodexCmd
+    $script:CodexCmd = $null
+    $script:TestCodexQuota = '{"rateLimits":{"primary":{"usedPercent":10}}}' | ConvertFrom-Json
+    $script:TestClaudeQuota = '{"five_hour":{"utilization":10}}' | ConvertFrom-Json
+    $vSinCodexFresco = Get-CodexVerdict
+    Check ($vSinCodexFresco.Decision -eq 'NO-GO') 'Get-CodexVerdict da NO-GO cuando codex no esta instalado, aunque la cuota (mockeada) fuera GO'
+    Check ($vSinCodexFresco.Reason -match 'instalado') 'Get-CodexVerdict explica el NO-GO por codex no instalado, distinto del WARN de cuota ilegible'
+
+    Add-CapacityState $vSinCodexFresco
+    Check ($vSinCodexFresco.State -eq 'CLAUDE-LEAD') 'Sin codex instalado y Claude fresco: Add-CapacityState enruta a CLAUDE-LEAD'
+
+    $script:TestClaudeQuota = '{"five_hour":{"utilization":95}}' | ConvertFrom-Json
+    $vSinCodexCritico = Get-CodexVerdict
+    Add-CapacityState $vSinCodexCritico
+    Check ($vSinCodexCritico.State -eq 'SURVIVAL') 'Sin codex instalado y Claude critico: Add-CapacityState enruta a SURVIVAL'
+
+    $script:TestClaudeQuota = $null
+    $script:CodexCmd = $previousCodexCmdForVerdict
 
     $script:TestCodexQuota = '{"rateLimits":{"spendControlReached":true,"primary":{"usedPercent":0}}}' | ConvertFrom-Json
     Check ((Get-BudgetVerdict).Decision -eq 'NO-GO') 'Get-BudgetVerdict rejects reached spend control'
@@ -210,6 +263,68 @@ try {
         } finally {
             Remove-Item -LiteralPath $schema -ErrorAction SilentlyContinue
         }
+    }
+
+    # ------------------- degradacion sin codex instalado: proceso real ---
+    # El throw de Get-CodexCommand pasa a nivel de script, ANTES de que exista
+    # ninguna funcion que mockear: solo se puede probar en un proceso hijo con
+    # el PATH limpio. Confirma que ni el dot-source ni -BudgetOnly ni
+    # -QuotaCache revientan cuando no hay codex.
+    $codexRunScript = (Join-Path $PSScriptRoot '..\scripts\codex-run.ps1')
+    # Los sub-tests de esta seccion levantan procesos hijo cuyo stderr, al
+    # mezclarse con 2>&1 bajo ErrorActionPreference=Stop, terminaria esta
+    # misma suite. Los aislamos con Continue y restauramos despues.
+    #
+    # Los hijos van con -File, no con -Command "& script": es como los invoca de
+    # verdad Claude Code (settings.json, la statusline y la Fase 0.5 del SKILL),
+    # y es la unica forma en que `exit N` del script llega al codigo de salida
+    # del proceso. Con -Command el codigo se pierde y el test mentiria.
+    # El PATH se limpia en ESTE proceso y el hijo lo hereda; por eso hay que
+    # resolver el ejecutable del host antes de limpiarlo, o deja de encontrarse.
+    $psExe       = (Get-Process -Id $PID).Path
+    $previousEap = $ErrorActionPreference
+    $previousPath = $env:PATH
+    $ErrorActionPreference = 'Continue'
+    try {
+        $env:PATH = 'C:\Windows\System32'
+
+        $dotSourceOut  = & $psExe -NoProfile -ExecutionPolicy Bypass -Command ". '$codexRunScript'" 2>&1
+        $dotSourceExit = $LASTEXITCODE
+        Check ($dotSourceExit -eq 0) 'Dot-sourcear codex-run.ps1 sin codex en el PATH no tira excepcion'
+        Check (($dotSourceOut -join "`n") -notmatch 'No se encontro el ejecutable') 'Dot-source sin codex no emite el mensaje de throw viejo'
+
+        $budgetOnlyOut  = & $psExe -NoProfile -ExecutionPolicy Bypass -File $codexRunScript -BudgetOnly 2>&1
+        $budgetOnlyExit = $LASTEXITCODE
+        $budgetOnlyText = ($budgetOnlyOut -join "`n")
+        Check ($budgetOnlyExit -eq 2) '-BudgetOnly sin codex en el PATH sale con codigo 2 (NO-GO)'
+        Check ($budgetOnlyText -match 'NO-GO') '-BudgetOnly sin codex en el PATH informa NO-GO'
+        Check ($budgetOnlyText -match 'Presupuesto') '-BudgetOnly sin codex en el PATH imprime el presupuesto igual'
+        Check ($budgetOnlyText -notmatch 'Exception|ScriptHalted') '-BudgetOnly sin codex en el PATH no tira excepcion'
+
+        # Un rol si necesita el binario: tiene que decirlo y salir 5, no reventar.
+        $roleOut  = & $psExe -NoProfile -ExecutionPolicy Bypass -File $codexRunScript -Role constructor -Prompt 'nada' 2>&1
+        $roleExit = $LASTEXITCODE
+        Check ($roleExit -eq 5) '-Role sin codex en el PATH sale con codigo 5, no con una excepcion'
+        Check ((($roleOut -join "`n")) -match 'instalado') '-Role sin codex explica que falta el binario'
+
+        $quotaCacheTemp = Join-Path $testRoot 'quotacache-temp'
+        New-Item -ItemType Directory -Force -Path $quotaCacheTemp | Out-Null
+        $previousTemp = $env:TEMP
+        $env:TEMP = $quotaCacheTemp
+        try {
+            & $psExe -NoProfile -ExecutionPolicy Bypass -File $codexRunScript -QuotaCache 2>&1 | Out-Null
+            $quotaCacheExit = $LASTEXITCODE
+        } finally { $env:TEMP = $previousTemp }
+        $quotaCacheFile = Join-Path $quotaCacheTemp 'claude/codex-usage-cache.json'
+        Check ($quotaCacheExit -eq 0) '-QuotaCache sin codex en el PATH sale con codigo 0'
+        Check (Test-Path $quotaCacheFile) '-QuotaCache sin codex en el PATH escribe igual el archivo de cache'
+        if (Test-Path $quotaCacheFile) {
+            $cacheJson = Get-Content -LiteralPath $quotaCacheFile -Raw -Encoding UTF8 | ConvertFrom-Json
+            Check ($null -eq $cacheJson.free_pct) '-QuotaCache sin codex en el PATH escribe free_pct nulo'
+        }
+    } finally {
+        $ErrorActionPreference = $previousEap
+        $env:PATH = $previousPath
     }
 }
 finally {
