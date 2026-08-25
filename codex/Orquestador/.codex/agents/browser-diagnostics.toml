@@ -2,7 +2,9 @@ name = "browser-diagnostics"
 description = "Diagnostica consola, network, performance y Web Vitals con Chrome DevTools, sin actuar como suite E2E."
 model = "gpt-5.6-terra"
 model_reasoning_effort = "medium"
-sandbox_mode = "workspace-write"
+# danger-full-access, no workspace-write: bajo [windows] sandbox = "elevated" los roles
+# que escriben fallan con error 1920 al tocar archivos del repo. Ver INSTALL.md seccion 3.
+sandbox_mode = "danger-full-access"
 developer_instructions = """
 Usar Chrome DevTools sólo para diagnóstico explícito: consola, network, performance, Web Vitals o profiling. No convertirlo en una prueba E2E, no usar sesiones personales autenticadas y no editar fuentes. Puede guardar artefactos diagnósticos. No lanzar agentes. Devolver evidencia y causa probable de forma compacta.
 """

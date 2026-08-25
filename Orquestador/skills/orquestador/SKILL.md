@@ -300,8 +300,9 @@ de que la spec no alcanza, que es justo lo que la regla busca detectar.
 
 - Infraestructura o tooling — build caído, dependencia sin instalar, runner que
   no arranca.
-- Sandbox — el `python.exe` de WindowsApps, el `.venv` bajo `elevated`. Codex los
-  marca `NOT_RUN`, no RED, precisamente para no mentir un resultado.
+- Sandbox — el `python.exe` de WindowsApps. Codex lo marca `NOT_RUN`, no RED,
+  precisamente para no mentir un resultado. (El caso del `.venv` bajo `elevated`
+  quedó resuelto: los roles que escriben corren en `danger-full-access`.)
 - Red o timeout, incluido el del RPC de cuota.
 - Salida sin JSON válido que el wrapper truncó.
 

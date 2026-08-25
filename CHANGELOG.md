@@ -7,6 +7,37 @@ correspondiente de [`docs/SYSTEM.md`](docs/SYSTEM.md) en el mismo diff.
 
 ## [Unreleased]
 
+### Changed
+
+- **Sandbox de Codex: los roles que escriben van en `danger-full-access`.** Iban 3
+  fallos en 4 invocaciones con error 1920: bajo `[windows] sandbox = "elevated"`,
+  `workspace-write` deniega las escrituras dentro del propio workspace. Tocar sólo
+  `~/.codex/config.toml` no arreglaba nada, porque `codex-run.ps1` pasa el sandbox
+  explícito por línea de comandos (`-s`, leído de `~/.codex/agents/<rol>.toml`) y un
+  flag de CLI le gana siempre al config global. Ahora el instalador escribe **los dos
+  niveles**: `sandbox_mode = "danger-full-access"` + `approval_policy = "never"` en el
+  config global, y `danger-full-access` en los cinco roles que escriben
+  (`constructor`, `tester-tdd`, `verifier`, `e2e-browser`, `browser-diagnostics`).
+  `explorador`, `reviewer`, `security-reviewer` y `docs-researcher` **siguen en
+  `read-only`**: la barrera de los lectores es el sandbox, no sólo el prompt.
+  `verify.ps1` chequea ambos niveles. El wrapper sigue sin pasar nunca
+  `--dangerously-bypass-approvals-and-sandbox`: esto es config declarada, por rol.
+
+### Fixed
+
+- **La statusline perdía la salida del upstream y mostraba la versión de la CLI.**
+  `statusline-wrapper.ps1` hacía `$line = $stdin | & statusline.ps1`, pero el upstream
+  termina en `Write-Host -NoNewline`, que en PS 5.1 escribe al stream de información y
+  no al pipeline: `$line` quedaba vacío y la línea llegaba a la consola por fuera del
+  wrapper, imposible de editar. Con `6>&1` ahora se captura de verdad, y sobre eso se
+  saca el segmento de versión (` | v2.1.245`) sin tocar el clon, para que `git pull`
+  sobre ClaudeCodeStatusLine siga funcionando.
+- **`CX %` ahora va coloreado** por umbral, igual que los porcentajes de Claude, con
+  los umbrales de `Get-UsageColor` espejados porque `free_pct` es cuota disponible y
+  no usada (verde ≥50, amarillo ≥30, naranja ≥10, rojo abajo). Se redondea a entero y
+  se inserta al final de la **primera** línea, no después del aviso de update.
+  Cubierto por `Orquestador/tests/test-statusline-wrapper.ps1`.
+
 ### Added
 
 - **Señal de vida de Codex.** Una delegación era silencio total hasta que

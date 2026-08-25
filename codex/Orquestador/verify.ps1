@@ -23,11 +23,20 @@ function Get-McpServerSection {
 }
 
 $agentNames = @('explorador', 'tester-tdd', 'constructor', 'reviewer', 'security-reviewer', 'docs-researcher', 'verifier', 'e2e-browser', 'browser-diagnostics')
+# Roles que escriben. Van en danger-full-access: bajo [windows] sandbox = "elevated",
+# workspace-write deniega las escrituras dentro del repo y Codex muere con error 1920.
+# El resto sigue read-only: la barrera de los lectores es el sandbox, no solo el prompt.
+$writerRoles = @('constructor', 'tester-tdd', 'verifier', 'e2e-browser', 'browser-diagnostics')
 $skillNames = @('constructor', 'revisor-completo')
 $base = if ($Global) { $CodexHome } else { Join-Path $KitRoot '.codex' }
 $skillsBase = if ($Global) { $SkillsHome } else { Join-Path $KitRoot '.agents\skills' }
 
 Check (Test-Path (Join-Path $base 'config.toml')) 'config.toml presente'
+if (Test-Path (Join-Path $base 'config.toml')) {
+    $cfg = Get-Content -LiteralPath (Join-Path $base 'config.toml') -Raw
+    Check ($cfg -match '(?m)^sandbox_mode\s*=\s*"danger-full-access"\s*$') 'config.toml en danger-full-access'
+    Check ($cfg -match '(?m)^approval_policy\s*=\s*"never"\s*$')          'config.toml con approval_policy never'
+}
 $agentsInstructionsPath = if ($Global) { Join-Path $CodexHome 'AGENTS.md' } else { Join-Path $KitRoot 'AGENTS.md' }
 Check (Test-Path $agentsInstructionsPath) 'AGENTS.md efectivo presente'
 if (Test-Path $agentsInstructionsPath) {
@@ -44,6 +53,11 @@ foreach ($name in $agentNames) {
     if (Test-Path $path) {
         $content = Get-Content -LiteralPath $path -Raw
         Check ($content -match '(?ms)^\[agents\]\s*enabled\s*=\s*false') "$name no puede lanzar agentes"
+
+        # El -s de la linea de comandos le gana al config global, asi que este es el
+        # nivel que decide: codex-run.ps1 lee sandbox_mode de aca (Get-RoleConfig).
+        $expectedSandbox = if ($writerRoles -contains $name) { 'danger-full-access' } else { 'read-only' }
+        Check ($content -match "(?m)^sandbox_mode\s*=\s*""$expectedSandbox""\s*$") "$name en sandbox $expectedSandbox"
 
         $expectedMcpServers = @('context7', 'serena', 'playwright', 'chrome-devtools')
         $actualMcpServers = @([regex]::Matches($content, '(?m)^\[mcp_servers\.([^\]]+)\]\s*$') | ForEach-Object { $_.Groups[1].Value })

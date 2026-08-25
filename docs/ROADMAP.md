@@ -155,9 +155,15 @@ Windows, deja obsoleto el registry propio de abajo.
 
 ### Gotcha de entorno: `.venv` bajo sandbox de Windows
 
+**Resuelto (2026-08-25):** los cinco roles que escriben pasaron a
+`sandbox_mode = "danger-full-access"`, que no aplica ACEs y por lo tanto no tiene
+este problema. Se deja el diagnóstico anotado porque explica por qué el kit no
+puede volver a `workspace-write` en Windows.
+
 Con `sandbox_mode = "workspace-write"` + `[windows] sandbox = "elevated"`, Codex
 no puede leer los `.pyd`/`.dll` de un `.venv` preexistente: el sandbox aplica la
 ACE heredable sólo en la raíz del workspace y no repara los descendientes ya
-creados (openai/codex#15165, sin fix upstream). Workaround: `icacls ".\.venv"
-/reset /T /C /Q` una vez por repo. Pasar a `unelevated` NO es solución: rompe
-`apply_patch` con split roots (openai/codex#32168, #32314).
+creados (openai/codex#15165, sin fix upstream). Es la misma raíz que el error 1920
+que rompía a `constructor` y `tester-tdd`. Workaround de la época:
+`icacls ".\.venv" /reset /T /C /Q` una vez por repo. Pasar a `unelevated` NO era
+solución: rompe `apply_patch` con split roots (openai/codex#32168, #32314).

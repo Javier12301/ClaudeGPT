@@ -471,6 +471,14 @@ Si ahí aparece, el `PSModulePath` es la causa.
 intérpretes instalados desde la Microsoft Store (`WindowsApps\python.exe`). Instalá
 Python desde python.org. Codex marca `tests: NOT_RUN` en vez de inventar un GREEN.
 
+**Codex falla con error 1920 al escribir en el repo.** El rol quedó en
+`sandbox_mode = "workspace-write"`. Bajo `[windows] sandbox = "elevated"` eso deniega
+las escrituras dentro del propio workspace. Los cinco roles que escriben van en
+`danger-full-access`; corré `codex\Orquestador\install.ps1` de nuevo, o verificá con
+`codex\Orquestadorerify.ps1 -Global`. Ojo: no alcanza con tocar
+`~/.codex/config.toml`, porque `codex-run.ps1` pasa el sandbox por `-s` desde
+`~/.codex/agents/<rol>.toml` y el flag de CLI le gana al config global.
+
 **Una corrida de Codex se cuelga hasta el timeout.** Suele ser un hook que escribe
 algo distinto del JSON del contrato en stdout. Un hook `PreToolUse` debe emitir
 **solo** su JSON.

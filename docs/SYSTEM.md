@@ -409,10 +409,10 @@ duplican prompts.
 
 | Rol | Tier | Sandbox | Cuándo |
 |---|---|---|---|
-| `constructor` | worker | workspace-write | Implementación voluminosa contra tests RED ya escritos |
+| `constructor` | worker | danger-full-access | Implementación voluminosa contra tests RED ya escritos |
 | `reviewer` | worker / high | read-only | Correctness, regresiones, races, edge cases |
 | `security-reviewer` | worker / high | read-only | auth, permisos, pagos, uploads, tokens, trust boundaries |
-| `verifier` | cheap / low | workspace-write | build, lint, typecheck, suites largas |
+| `verifier` | cheap / low | danger-full-access | build, lint, typecheck, suites largas |
 | `docs-researcher` | cheap | read-only | Segunda opinión documental, versiones, deprecaciones |
 
 Por qué esos cinco roles y no los demás del kit Codex (`explorador`,
@@ -672,7 +672,7 @@ de trabajo, una línea por delegación.
 
 ```json
 {"ts":"2026-08-20T22:26:35","task":"slugify","role":"constructor","tier":"worker",
- "model":"gpt-5.6-terra","effort":"medium","sandbox":"workspace-write",
+ "model":"gpt-5.6-terra","effort":"medium","sandbox":"danger-full-access",
  "reused":false,"session":{"id":"01a021ee-...","rollout_kb":134},
  "codex_free_pct":80,"claude_5h_used":29,"claude_7d_used":25,
  "state":"CODEX-PREFERRED","phase":"construct","retry_of":null,
@@ -777,7 +777,16 @@ Nunca pasa `--dangerously-bypass-approvals-and-sandbox`,
 `--dangerously-bypass-hook-trust` ni `--ignore-rules`. Los tres desarman las
 protecciones. Los reviewers van siempre `-s read-only`.
 
+Los roles que escriben sí corren en `danger-full-access`, y no es lo mismo: eso es
+un `sandbox_mode` declarado en `~/.codex/agents/<rol>.toml`, por rol, auditable y
+verificado por `verify.ps1`. El flag es global, se aplica a todo lo que corra en esa
+invocación y no deja rastro en el TOML. La distinción importa porque se leen
+parecido.
+
 ### Windows
 
-Sandbox nativo `elevated`, `network_access = false`. El wrapper corre en
-PowerShell 5.1 sin dependencias.
+Sandbox nativo `elevated`. El wrapper corre en PowerShell 5.1 sin dependencias.
+
+`[sandbox_workspace_write] network_access = false` sigue declarado pero no aplica a
+los roles que escriben: bajo `danger-full-access` la red está abierta. Queda por si
+algún rol vuelve a `workspace-write`.

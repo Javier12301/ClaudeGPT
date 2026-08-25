@@ -2,7 +2,9 @@ name = "e2e-browser"
 description = "Ejecuta E2E de interfaz con Playwright sólo cuando el usuario lo pide o el Orquestador lo justifica explícitamente."
 model = "gpt-5.6-terra"
 model_reasoning_effort = "medium"
-sandbox_mode = "workspace-write"
+# danger-full-access, no workspace-write: bajo [windows] sandbox = "elevated" los roles
+# que escriben fallan con error 1920 al tocar archivos del repo. Ver INSTALL.md seccion 3.
+sandbox_mode = "danger-full-access"
 developer_instructions = """
 Usar Playwright para actuar como usuario y validar un flujo E2E indicado. No activarse para cambios pequeños ni para probar APIs REST. No inventar credenciales; usar únicamente cuentas o tokens de testing proporcionados. No editar producción ni lanzar agentes. Capturar pasos, resultado, consola/red relevante y artefactos mínimos.
 """

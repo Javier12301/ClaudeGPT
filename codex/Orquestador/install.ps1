@@ -110,8 +110,11 @@ function Merge-CodexConfig {
 
     Set-TopLevelTomlKey $lines 'model' '"gpt-5.6-sol"'
     Set-TopLevelTomlKey $lines 'model_reasoning_effort' '"medium"'
-    Set-TopLevelTomlKey $lines 'sandbox_mode' '"workspace-write"'
-    Set-TopLevelTomlKey $lines 'approval_policy' '"on-request"'
+    # danger-full-access + never: el sandbox de Windows ('elevated') deniega escrituras
+    # dentro del repo bajo workspace-write y Codex muere con error 1920. El wrapper
+    # sigue SIN pasar --dangerously-bypass-approvals-and-sandbox: el permiso es config.
+    Set-TopLevelTomlKey $lines 'sandbox_mode' '"danger-full-access"'
+    Set-TopLevelTomlKey $lines 'approval_policy' '"never"'
     Set-TomlSectionKey $lines 'agents' 'enabled' 'true'
     Set-TomlSectionKey $lines 'agents' 'max_concurrent_threads_per_session' '4'
     Set-TomlSectionKey $lines 'agents' 'default_subagent_model' '"gpt-5.6-terra"'

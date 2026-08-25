@@ -52,7 +52,20 @@ Revisá y confiá el hook desde `/hooks`, luego iniciá una sesión nueva.
 ## 3. Configuración aplicada
 
 - Principal: `gpt-5.6-sol`, reasoning Medium.
-- Sandbox: `workspace-write`, red deshabilitada, approvals `on-request`.
+- Sandbox: `danger-full-access` con approvals `never` para los cinco roles que
+  escriben (`constructor`, `tester-tdd`, `verifier`, `e2e-browser`,
+  `browser-diagnostics`). Los otros cuatro (`explorador`, `reviewer`,
+  `security-reviewer`, `docs-researcher`) siguen en `read-only`: su barrera es el
+  sandbox, no sólo las instrucciones del rol.
+
+  Por qué: bajo `[windows] sandbox = "elevated"`, `workspace-write` deniega las
+  escrituras dentro del propio repo y Codex muere con error 1920. Hay que tocar
+  **los dos niveles** — `~/.codex/config.toml` y cada `~/.codex/agents/<rol>.toml` —
+  porque `codex-run.ps1` pasa el sandbox explícito por línea de comandos (`-s`), y
+  un flag de CLI le gana siempre al config global.
+
+  Esto **no** es `--dangerously-bypass-approvals-and-sandbox`: el permiso se declara
+  en config, el wrapper sigue sin pasar ese flag nunca.
 - Windows: sandbox nativo `elevated`; usar `unelevated` sólo si políticas corporativas bloquean el modo recomendado.
 - Concurrencia: cuatro subagentes como máximo.
 - Status line nativa con modelo, reasoning, contexto, límites y branch.

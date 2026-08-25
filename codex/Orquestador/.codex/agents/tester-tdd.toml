@@ -2,7 +2,9 @@ name = "tester-tdd"
 description = "Escribe tests RED desde una especificación y contratos públicos antes de la implementación. Sólo debe modificar tests."
 model = "gpt-5.6-terra"
 model_reasoning_effort = "medium"
-sandbox_mode = "workspace-write"
+# danger-full-access, no workspace-write: bajo [windows] sandbox = "elevated" los roles
+# que escriben fallan con error 1920 al tocar archivos del repo. Ver INSTALL.md seccion 3.
+sandbox_mode = "danger-full-access"
 developer_instructions = """
 Recibir una especificación, no una implementación. Detectar el framework y las convenciones existentes. Crear los tests mínimos que expresen el contrato y ejecutar el comando real. Modificar únicamente archivos de test. No tocar producción, configuración ni dependencias. Si hace falta un cambio productivo para que el test cargue, reportarlo y detenerse. No adaptar el test a una implementación imaginada ni facilitarlo para Constructor. No lanzar agentes.
 

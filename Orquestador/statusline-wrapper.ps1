@@ -16,7 +16,19 @@ $inv = [System.Globalization.CultureInfo]::InvariantCulture
 [System.Threading.Thread]::CurrentThread.CurrentUICulture = $inv
 
 $stdin = [Console]::In.ReadToEnd()
-$line = $stdin | & (Join-Path $PSScriptRoot 'statusline/statusline.ps1')
+# 6>&1 no es decoracion: el script upstream termina en `Write-Host -NoNewline`, que en
+# PS 5.1 escribe al stream de informacion y NO al pipeline. Sin redirigirlo, $line queda
+# vacio y la linea llega a la consola por fuera de este script -- imposible editarla.
+# -Width alto y explicito: Out-String corta a lo ancho de la consola por defecto y
+# parte la statusline en varias lineas con CRLF en el medio.
+$line = ($stdin | & (Join-Path $PSScriptRoot 'statusline/statusline.ps1') 6>&1 |
+         Out-String -Width 4096).TrimEnd()
+
+# Segmento de version de la CLI (` | v2.1.245` naranja). El upstream lo emite al final,
+# pero cuando hay update disponible agrega otra linea despues: por eso el patron se ancla
+# a la forma exacta del segmento y no al fin de cadena. Se saca aca y no en el clon para
+# que `git pull` sobre ClaudeCodeStatusLine siga funcionando.
+$line = $line -replace ' \x1b\[2m\|\x1b\[0m \x1b\[38;2;255;176;85mv[0-9][^\x1b]*\x1b\[0m', ''
 
 # Segmento de cuota de Codex. Se lee de un cache con TTL 60s y el refresco se
 # dispara desacoplado: el RPC contra `codex app-server` tarda 1-2s y la
@@ -41,11 +53,26 @@ if ($stale) {
     }
 }
 
+# Colores del upstream (statusline.ps1). Se duplican en vez de dot-sourcear el clon,
+# porque dot-sourcearlo ejecutaria el script entero. `e es PS7+: [char]0x1b es PS 5.1.
+$e     = [char]0x1b
+$dimC  = "$e[2m"
+$reset = "$e[0m"
+
 $seg = ''
 if (Test-Path $cache) {
     try {
         $cx = Get-Content $cache -Raw -Encoding UTF8 | ConvertFrom-Json
-        if ($null -ne $cx.free_pct) { $seg = ' | CX ' + $cx.free_pct + '%' }
+        if ($null -ne $cx.free_pct) {
+            # free_pct es cuota DISPONIBLE, no usada: los umbrales de Get-UsageColor del
+            # upstream van espejados (verde = queda mucho).
+            $pct = [int][math]::Round([double]$cx.free_pct)
+            $c = if     ($pct -ge 50) { "$e[38;2;0;160;0m" }
+                 elseif ($pct -ge 30) { "$e[38;2;230;200;0m" }
+                 elseif ($pct -ge 10) { "$e[38;2;255;176;85m" }
+                 else                 { "$e[38;2;255;85;85m" }
+            $seg = " $dimC|$reset ${dimC}CX$reset $c$pct%$reset"
+        }
     } catch { }
 }
 # Senal de vida de Codex. El wrapper borra este archivo al terminar la corrida,
@@ -66,4 +93,8 @@ if (Test-Path $act) {
     } catch { }
 }
 
-(($line -join "`n") + $seg)
+# El seg va al final de la PRIMERA linea: el upstream puede agregar una segunda con el
+# aviso de update, y la cuota pegada ahi abajo no se lee.
+$lines = @($line -split "`r?`n")
+$lines[0] = $lines[0].TrimEnd() + $seg
+($lines -join "`n")
