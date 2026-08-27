@@ -14,7 +14,7 @@
 .EXAMPLE
   .\codex-run.ps1 -BudgetOnly
   .\codex-run.ps1 -Role constructor -PromptFile spec.md -Repo C:\proj -Task "reset password"
-  .\codex-run.ps1 -Resume 01a01bad-xxxx -Prompt "Falta exportar resetToken. Corregilo."
+  .\codex-run.ps1 -Resume 01a01bad-xxxx -Role constructor -PromptFile continuation.md -ClarifyOf 01a01bad-xxxx
   .\codex-run.ps1 -SessionInfo 01a01bad-xxxx
 
 .NOTES
@@ -38,6 +38,10 @@ param(
     [ValidateSet('explore','contract','test','construct','verify','review','docs')]
     [string]$Phase = '',
     [string]$RetryOf = '',
+    # -ClarifyOf lleva el session id de un intento que respondio NEEDS_INFO y
+    # registra una continuacion de aclaracion: NO consume el presupuesto de
+    # reintentos por RED logico.
+    [string]$ClarifyOf = '',
 
     [string]$Resume,
     [string]$SessionInfo,
@@ -553,7 +557,7 @@ function Get-RoleConfig([string]$RoleName) {
 function New-SchemaFile([string]$Kind) {
     $impl = @'
 {"type":"object","additionalProperties":false,
- "required":["files_changed","summary","tests","risks","blocked"],
+ "required":["files_changed","summary","tests","risks","blocked","status","clarifications"],
  "properties":{
    "files_changed":{"type":"array","items":{"type":"string"}},
    "summary":{"type":"string"},
@@ -561,7 +565,14 @@ function New-SchemaFile([string]$Kind) {
      "properties":{"command":{"type":"string"},
                    "status":{"type":"string","enum":["GREEN","RED","NOT_RUN"]}}},
    "risks":{"type":"array","items":{"type":"string"}},
-   "blocked":{"type":"boolean"}}}
+   "blocked":{"type":"boolean"},
+   "status":{"type":"string","enum":["DONE","NEEDS_INFO","BLOCKED"]},
+   "clarifications":{"type":"array","items":{"type":"object","additionalProperties":false,
+     "required":["missing_fact","evidence_checked","question","affected_decision"],
+     "properties":{"missing_fact":{"type":"string"},
+                   "evidence_checked":{"type":"array","items":{"type":"string"}},
+                   "question":{"type":"string"},
+                   "affected_decision":{"type":"string"}}}}}}
 '@
     $review = @'
 {"type":"object","additionalProperties":false,
@@ -587,6 +598,26 @@ function New-SchemaFile([string]$Kind) {
     # schema con "not valid JSON: expected value at line 1 column 1".
     [System.IO.File]::WriteAllText($p, $body, (New-Object System.Text.UTF8Encoding($false)))
     return $p
+}
+
+# El JSON Schema deja status, blocked y clarifications como campos independientes:
+# la invariante que los liga (ver docs/DECISIONS.md D-016) es de prompt, no de
+# schema. Esto la chequea despues de parsear para que un NEEDS_INFO sin preguntas
+# o un BLOCKED con blocked=false no pasen como resultado sano. Devuelve $true si
+# el payload cumple o si no es un payload impl (no aplica).
+function Test-StatusInvariant($payload) {
+    if (-not $payload) { return $true }
+    $names = $payload.PSObject.Properties.Name
+    if ($names -notcontains 'status') { return $true }
+    $st = "$($payload.status)"
+    $bl = [bool]$payload.blocked
+    $cl = @($payload.clarifications).Count
+    switch ($st) {
+        'DONE'       { return (-not $bl) -and ($cl -eq 0) }
+        'NEEDS_INFO' { return (-not $bl) -and ($cl -ge 1) }
+        'BLOCKED'    { return $bl }
+        default      { return $false }
+    }
 }
 
 # ------------------------------------------------------------ sesiones ---
@@ -693,7 +724,15 @@ if ($SessionInfo) {
 }
 
 if (-not $Role -and -not $Resume) {
-    Write-Output "Uso: -BudgetOnly | -SessionInfo <id> | -Role <rol> -PromptFile <f> | -Resume <id> -Prompt <txt>"
+    Write-Output "Uso: -BudgetOnly | -SessionInfo <id> | -Role <rol> -PromptFile <f> | -Resume <id> -Role <rol> -PromptFile <f>"
+    exit 6
+}
+
+# El schema y la variante del prompt salen del rol. Una sesion de review/docs
+# reanudada sin -Role caeria en el schema 'impl' por el default de mas abajo y
+# Codex emitiria un payload incompatible. El que reanuda siempre sabe que rol era.
+if ($Resume -and -not $PSBoundParameters.ContainsKey('Role')) {
+    Write-Output "-Resume requiere -Role explicito: el contrato de salida depende del rol de la sesion."
     exit 6
 }
 
@@ -758,12 +797,33 @@ Write-Output ("Rol: {0} | modelo: {1} ({2}/{3}) | sandbox: {4}" -f $Role, $model
 $fullPrompt = @"
 $($roleCfg.Instructions)
 
-Consulta Engram si el area pudo haberse trabajado antes. NO guardes en Engram:
-reporta cualquier hallazgo relevante en el campo de riesgos y el Tech Lead decide.
+Check Engram in case this area was worked on before. Do NOT write to Engram:
+report any relevant finding in the risks field and let the Tech Lead decide.
 
-Responde UNICAMENTE con el JSON del esquema pedido. Sin prosa alrededor.
+Never invent or infer a task-critical repository fact (database engine,
+framework, library, package manager, test runner, infrastructure, API
+contract, deployment target, architecture decision, version-specific
+behavior). Inspect repository evidence first. If the fact can be determined
+locally, continue. If a repository fact contradicts the spec, report the
+conflict instead of overriding either source.
 
----- TAREA ----
+$(if ($RoleSchema[$Role] -eq 'impl') {
+"If more than one valid interpretation remains and the choice affects`n" +
+"implementation, do not pick one: set status to NEEDS_INFO and list every open`n" +
+"question at once in the clarifications array.`n`n" +
+"Result status field:`n" +
+"  DONE       - work finished; clarifications empty; blocked = false`n" +
+"  NEEDS_INFO - a required fact could not be verified; at least one`n" +
+"               clarification; blocked = false`n" +
+"  BLOCKED    - a real execution or environment blocker; blocked = true"
+} else {
+"If a required fact cannot be verified from repository evidence, say so`n" +
+"explicitly in your output rather than assuming it."
+})
+
+Reply ONLY with the JSON for the requested schema. No prose around it.
+
+---- TASK ----
 $PromptText
 "@
 
@@ -816,10 +876,21 @@ if (-not $sessionId) {
 $detail    = if ($sessionId) { Get-SessionDetail $sessionId } else { $null }
 
 Write-Output ""
-if ($run.ExitCode -ne 0 -and -not $payload) {
+# Un exit distinto de 0 de `codex exec` es fallo aunque haya quedado JSON en -o
+# (puede ser de una corrida previa, o el schema fue rechazado): no se reporta como
+# resultado sano.
+if ($run.ExitCode -ne 0) {
     Write-Output "== Codex FALLO (exit $($run.ExitCode)) =="
     Write-Output (($run.Err -split "`n" | Select-Object -Last 5) -join "`n")
     Write-Output "El trabajo parcial (si lo hay) quedo en el working tree: revisar con git diff."
+    exit 4
+}
+
+if (-not (Test-StatusInvariant $payload)) {
+    Write-Output "== Contrato violado =="
+    Write-Output ("status='{0}' blocked={1} clarifications={2} no cumple la invariante (docs/DECISIONS.md D-016)." -f `
+        $payload.status, [bool]$payload.blocked, @($payload.clarifications).Count)
+    Write-Output "Salida completa en: $outFile"
     exit 4
 }
 
@@ -827,15 +898,41 @@ Write-Output "== Resultado ($Role) =="
 if ($payload) {
     $keys = $payload.PSObject.Properties.Name
     if ($keys -contains 'files_changed') {
-        Write-Output "Archivos:"
-        foreach ($f in $payload.files_changed) { Write-Output "  - $f" }
-        Write-Output "Cambio: $($payload.summary)"
-        Write-Output "Tests : $($payload.tests.status) via $($payload.tests.command)"
-        if ($payload.risks -and @($payload.risks).Count -gt 0) {
-            Write-Output "Riesgos:"
-            foreach ($r in $payload.risks) { Write-Output "  - $r" }
+        # Status efectivo: el del payload si vino, si no se deriva de blocked.
+        $st = if (($keys -contains 'status') -and $payload.status) { "$($payload.status)" }
+              elseif ($payload.blocked) { 'BLOCKED' }
+              else { 'DONE' }
+        if ($st -eq 'NEEDS_INFO') {
+            Write-Output "== NECESITA INFO ($Role) =="
+            foreach ($c in $payload.clarifications) {
+                Write-Output "  - Falta      : $($c.missing_fact)"
+                Write-Output "    Pregunta   : $($c.question)"
+                Write-Output "    Decision   : $($c.affected_decision)"
+                Write-Output "    Verificado : $(@($c.evidence_checked) -join '; ')"
+            }
+            if (@($payload.files_changed).Count -gt 0) {
+                Write-Output "Trabajo parcial:"
+                foreach ($f in $payload.files_changed) { Write-Output "  - $f" }
+            }
+            if ($payload.summary) { Write-Output "Resumen: $($payload.summary)" }
         }
-        if ($payload.blocked) { Write-Output "BLOQUEADO: Codex no pudo completar." }
+        elseif ($st -eq 'BLOCKED') {
+            Write-Output "BLOQUEADO: $($payload.summary)"
+            if ($payload.risks -and @($payload.risks).Count -gt 0) {
+                Write-Output "Riesgos:"
+                foreach ($r in $payload.risks) { Write-Output "  - $r" }
+            }
+        }
+        else {
+            Write-Output "Archivos:"
+            foreach ($f in $payload.files_changed) { Write-Output "  - $f" }
+            Write-Output "Cambio: $($payload.summary)"
+            Write-Output "Tests : $($payload.tests.status) via $($payload.tests.command)"
+            if ($payload.risks -and @($payload.risks).Count -gt 0) {
+                Write-Output "Riesgos:"
+                foreach ($r in $payload.risks) { Write-Output "  - $r" }
+            }
+        }
     }
     elseif ($keys -contains 'findings') {
         if (@($payload.findings).Count -eq 0) {
@@ -882,7 +979,12 @@ Write-DecisionLog ([ordered]@{
     state          = $verdict.State
     phase          = $(if ($Phase)   { $Phase }   else { $null })
     retry_of       = $(if ($RetryOf) { $RetryOf } else { $null })
+    clarify_of     = $(if ($ClarifyOf) { $ClarifyOf } else { $null })
     exit_code = $run.ExitCode
+    status    = $(if ($payload -and $payload.PSObject.Properties.Name -contains 'files_changed') {
+                    if (($payload.PSObject.Properties.Name -contains 'status') -and $payload.status) { "$($payload.status)" }
+                    elseif ($payload.blocked) { 'BLOCKED' } else { 'DONE' }
+                 } else { $null })
     blocked   = $(if ($payload -and $payload.PSObject.Properties.Name -contains 'blocked') { [bool]$payload.blocked } else { $false })
     findings  = $(if ($payload -and $payload.PSObject.Properties.Name -contains 'findings') { @($payload.findings).Count } else { $null })
 })

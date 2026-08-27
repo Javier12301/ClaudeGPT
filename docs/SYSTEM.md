@@ -184,7 +184,10 @@ JSON Schema pasado con `--output-schema`, no la buena voluntad del prompt:
 ```json
 {"files_changed":[...],"summary":"...",
  "tests":{"command":"...","status":"GREEN|RED|NOT_RUN"},
- "risks":[...],"blocked":false}
+ "risks":[...],"blocked":false,
+ "status":"DONE|NEEDS_INFO|BLOCKED",
+ "clarifications":[{"missing_fact":"...","evidence_checked":["..."],
+                   "question":"...","affected_decision":"..."}]}
 ```
 
 Para review:
@@ -210,6 +213,57 @@ La salida sin JSON válido se trunca a 20 líneas.
 Estado: Activa
 Test: —
 Código: `Orquestador/scripts/codex-run.ps1` — `$MAX_OUTPUT_LINES`
+
+#### BR-011 — Estados de resultado estructurados
+
+El contrato `impl` lleva `status` (`DONE` | `NEEDS_INFO` | `BLOCKED`) además del
+booleano `blocked`, que se conserva. Invariante: `DONE` y `NEEDS_INFO` van con
+`blocked=false`; `BLOCKED` va con `blocked=true`. `DONE` exige `clarifications`
+vacío; `NEEDS_INFO` exige al menos una. `NEEDS_INFO` sale con exit code 0 y sigue
+siendo elegible para continuación directa de sesión. `BLOCKED` se reserva para un
+bloqueo real de ejecución o entorno, no para ambigüedad normal. Los contratos
+`review` y `docs` no cambian.
+
+El JSON Schema deja los tres campos independientes; la invariante que los liga la
+chequea el wrapper después de parsear (`Test-StatusInvariant`) y un payload que
+no la cumple se trata como contrato violado (exit 4), no como resultado sano. Un
+exit distinto de 0 de `codex exec` es fallo aunque haya quedado JSON en `-o`.
+`-Resume` exige `-Role` explícito: el schema y la variante del prompt dependen
+del rol de la sesión.
+
+Estado: Activa
+Test: `Orquestador/tests/test-codex-run.ps1` — `schema impl: required incluye
+status`; `Test-StatusInvariant: NEEDS_INFO sin clarifications viola`
+Código: `Orquestador/scripts/codex-run.ps1` — `New-SchemaFile`,
+`Test-StatusInvariant`, render de resultado, `Write-DecisionLog`
+
+#### BR-012 — Verify-before-infer para Codex
+
+Codex no inventa ni infiere un hecho crítico del repo (motor de BD, framework,
+librería, package manager, test runner, infra, contrato de API, target de
+deploy, decisión de arquitectura, comportamiento por versión). Inspecciona la
+evidencia del repo primero; si el hecho se determina localmente, sigue; si
+quedan interpretaciones válidas que cambian la implementación, devuelve
+`NEEDS_INFO`; si un hecho del repo contradice el spec, reporta el conflicto sin
+sobrescribir ninguna fuente.
+
+Estado: Activa
+Test: —
+Código: `codex/Orquestador/AGENTS.md`; `Orquestador/scripts/codex-run.ps1` —
+bloque de prompt inyectado; `codex/Orquestador/.codex/agents/*.toml`
+
+#### BR-013 — Tope de aclaraciones
+
+Máximo 2 ciclos de `NEEDS_INFO` por tarea/spec. Pasado el segundo sin resolver,
+el orquestador deja de reanudar en automático, revisa y enriquece el spec, y
+decide si abre una tarea Codex nueva o cierra por otra vía. `NEEDS_INFO` no es un
+RED lógico y no consume el presupuesto de retry: se registra con `-ClarifyOf`, no
+con `-RetryOf`. El tope es criterio del orquestador, no estado del wrapper.
+
+Estado: Activa
+Test: —
+Código: `Orquestador/skills/orquestador/SKILL.md`; `Orquestador/scripts/codex-run.ps1`
+— `-ClarifyOf`, `clarify_of` en `decisions.jsonl`
 
 ### Señal de vida durante la delegación
 
@@ -303,6 +357,10 @@ Veredicto: REUSE-OK  (libre <400KB, limite 1200KB)
 
 `--ephemeral` no persiste el rollout y deja la sesión irrecuperable. Se usa solo
 para one-shots genuinos (un review puntual, una consulta documental).
+
+Un `NEEDS_INFO` sano (exit 0, `blocked=false`) cuenta como corrida terminada sana
+para el reuso: la continuación directa se decide por el tamaño del rollout, igual
+que un `DONE`.
 
 ### Disciplina del orquestador
 
@@ -410,10 +468,17 @@ duplican prompts.
 | Rol | Tier | Sandbox | Cuándo |
 |---|---|---|---|
 | `constructor` | worker | danger-full-access | Implementación voluminosa contra tests RED ya escritos |
-| `reviewer` | worker / high | read-only | Correctness, regresiones, races, edge cases |
-| `security-reviewer` | worker / high | read-only | auth, permisos, pagos, uploads, tokens, trust boundaries |
+| `reviewer` | worker / high | danger-full-access | Correctness, regresiones, races, edge cases |
+| `security-reviewer` | worker / high | danger-full-access | auth, permisos, pagos, uploads, tokens, trust boundaries |
 | `verifier` | cheap / low | danger-full-access | build, lint, typecheck, suites largas |
-| `docs-researcher` | cheap | read-only | Segunda opinión documental, versiones, deprecaciones |
+| `docs-researcher` | cheap | danger-full-access | Segunda opinión documental, versiones, deprecaciones |
+
+Los cinco corren en `danger-full-access` no por necesitar escribir —`reviewer`,
+`security-reviewer` y `docs-researcher` no escriben— sino porque bajo
+`[windows] sandbox = "elevated"` el modo `read-only` no puede lanzar procesos
+hijo (`git`, `rg`) y Codex muere con `CreateProcessAsUserW` error 1920. Para los
+roles lectores la barrera es el prompt más `agents.enabled=false`, igual que en
+`verifier`. Ver [DECISIONS.md § D-017](DECISIONS.md#d-017--todos-los-roles-codex-en-danger-full-access-en-windows).
 
 Por qué esos cinco roles y no los demás del kit Codex (`explorador`,
 `tester-tdd`, `e2e-browser`, `browser-diagnostics`, `$constructor`,
@@ -775,18 +840,25 @@ no se bloquean).
 
 Nunca pasa `--dangerously-bypass-approvals-and-sandbox`,
 `--dangerously-bypass-hook-trust` ni `--ignore-rules`. Los tres desarman las
-protecciones. Los reviewers van siempre `-s read-only`.
+protecciones desde la línea de comandos, sin rastro en el TOML.
 
-Los roles que escriben sí corren en `danger-full-access`, y no es lo mismo: eso es
-un `sandbox_mode` declarado en `~/.codex/agents/<rol>.toml`, por rol, auditable y
-verificado por `verify.ps1`. El flag es global, se aplica a todo lo que corra en esa
-invocación y no deja rastro en el TOML. La distinción importa porque se leen
-parecido.
+Los nueve roles corren en `danger-full-access` vía `sandbox_mode` declarado en
+`~/.codex/agents/<rol>.toml`, por rol, auditable y verificado por `verify.ps1`.
+Eso no es lo mismo que el flag global: el permiso es config por rol, no un
+bypass. Los roles lectores (`reviewer`, `security-reviewer`, `docs-researcher`)
+también van `danger-full-access` porque en Windows `elevated` el `read-only` no
+arranca ningún proceso hijo (error 1920); su barrera es el prompt más
+`agents.enabled=false`.
 
 ### Windows
 
 Sandbox nativo `elevated`. El wrapper corre en PowerShell 5.1 sin dependencias.
 
-`[sandbox_workspace_write] network_access = false` sigue declarado pero no aplica a
-los roles que escriben: bajo `danger-full-access` la red está abierta. Queda por si
-algún rol vuelve a `workspace-write`.
+Bajo `elevated`, el único `sandbox_mode` que puede ejecutar comandos es
+`danger-full-access`: tanto `workspace-write` como `read-only` fallan con
+`CreateProcessAsUserW` error 1920 al lanzar el proceso hijo. Por eso los nueve
+roles del kit se declaran `danger-full-access`. Ver `D-017`.
+
+`[sandbox_workspace_write] network_access = false` sigue declarado pero no aplica
+bajo `danger-full-access`, donde la red está abierta. Queda por si algún rol
+vuelve a `workspace-write` en un entorno sin `elevated`.

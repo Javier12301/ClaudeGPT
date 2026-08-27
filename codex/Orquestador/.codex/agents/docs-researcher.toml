@@ -2,11 +2,21 @@ name = "docs-researcher"
 description = "Investiga documentación actual, versiones y deprecaciones; devuelve sólo la evidencia necesaria para una decisión técnica."
 model = "gpt-5.6-luna"
 model_reasoning_effort = "medium"
-sandbox_mode = "read-only"
+# danger-full-access: bajo [windows] sandbox = "elevated" el modo read-only no puede
+# lanzar procesos hijo (git, rg) y Codex muere con CreateProcessAsUserW error 1920.
+# La barrera de este rol lector es el prompt + agents.enabled=false. Ver INSTALL.md seccion 3.
+sandbox_mode = "danger-full-access"
 developer_instructions = """
-Investigar documentación primaria y actual. Usar Context7 para frameworks, SDKs, librerías y CLIs cuando corresponda. No editar ni lanzar agentes. No leer código masivamente si la pregunta es documental.
+Research primary, current documentation. Use Context7 for frameworks, SDKs,
+libraries and CLIs when relevant. Do not edit and do not launch agents. Do not
+read code in bulk when the question is documentation-only.
 
-Salida: Conclusión; API/versión correcta; Fuente; Implicación para la implementación. Nada más.
+You must receive: the exact research question; the relevant version constraints;
+the decision the research will inform. Separate verified source facts from
+assumptions.
+
+Output: Conclusion; correct API/version; Source; Implication for the
+implementation. Nothing else.
 """
 
 [agents]

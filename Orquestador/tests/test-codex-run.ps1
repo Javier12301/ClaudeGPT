@@ -265,6 +265,99 @@ try {
         }
     }
 
+    # ================= contrato de clarificacion (spec Codex hardening) =======
+    # RED hasta que Constructor implemente: el schema impl todavia no tiene
+    # status/clarifications, el param -ClarifyOf no existe, y el prompt sigue en
+    # espanol con "---- TAREA ----". review/docs y el enum interno de tests NO
+    # cambian: esas aserciones son guardas de no-regresion (verdes ahora y luego).
+    $implSchemaPath   = New-SchemaFile impl
+    $reviewSchemaPath  = New-SchemaFile review
+    $docsSchemaPath    = New-SchemaFile docs
+    try {
+        $implSchema   = Get-Content -LiteralPath $implSchemaPath   -Raw -Encoding UTF8 | ConvertFrom-Json
+        $reviewSchema = Get-Content -LiteralPath $reviewSchemaPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $docsSchema   = Get-Content -LiteralPath $docsSchemaPath   -Raw -Encoding UTF8 | ConvertFrom-Json
+
+        # -- item 1: forma nueva del schema impl --
+        Check (@($implSchema.required) -contains 'status')         'schema impl: required incluye status'
+        Check (@($implSchema.required) -contains 'clarifications')  'schema impl: required incluye clarifications'
+        $statusEnum = @($implSchema.properties.status.enum)
+        Check ((@($statusEnum | Sort-Object) -join ',') -eq 'BLOCKED,DONE,NEEDS_INFO') 'schema impl: properties.status.enum es el set DONE/NEEDS_INFO/BLOCKED'
+        Check ($implSchema.properties.clarifications.type -eq 'array') 'schema impl: properties.clarifications.type es array'
+        $clarItemReq = @($implSchema.properties.clarifications.items.required)
+        Check (@('missing_fact','evidence_checked','question','affected_decision' | Where-Object { $_ -notin $clarItemReq }).Count -eq 0) 'schema impl: el item de clarifications exige missing_fact/evidence_checked/question/affected_decision'
+
+        # -- item 1 (guarda): el sub-objeto tests sigue igual --
+        Check ((@($implSchema.properties.tests.properties.status.enum | Sort-Object) -join ',') -eq 'GREEN,NOT_RUN,RED') 'schema impl: el enum interno de tests.status sigue GREEN/RED/NOT_RUN (no-regresion)'
+
+        # -- item 2 (guarda): review y docs no ganan status/clarifications --
+        Check ((@($reviewSchema.required | Sort-Object) -join ',') -eq 'coverage_note,findings') 'schema review: required sigue siendo exactamente findings + coverage_note (no-regresion)'
+        Check (@($reviewSchema.required) -notcontains 'status') 'schema review: no gana status (no-regresion)'
+        Check ((@($docsSchema.required | Sort-Object) -join ',') -eq 'api_version,conclusion,implication,source') 'schema docs: required sigue siendo conclusion/api_version/source/implication (no-regresion)'
+        Check (@($docsSchema.required) -notcontains 'status') 'schema docs: no gana status (no-regresion)'
+
+        # -- item 4: payloads de ejemplo caben estructuralmente en el schema impl --
+        $implProps = @($implSchema.properties.PSObject.Properties.Name)
+        $needsInfoPayload = @{
+            files_changed  = @(); summary = 'partial'; risks = @(); blocked = $false
+            tests          = @{ command = 'x'; status = 'NOT_RUN' }
+            status         = 'NEEDS_INFO'
+            clarifications = @(@{ missing_fact = 'db engine'; evidence_checked = @('grep -r'); question = 'which db?'; affected_decision = 'migration path' })
+        }
+        $donePayload = @{
+            files_changed  = @('a.ps1'); summary = 'done'; risks = @(); blocked = $false
+            tests          = @{ command = 'x'; status = 'GREEN' }
+            status         = 'DONE'
+            clarifications = @()
+        }
+        foreach ($sample in @(
+            @{ Name = 'NEEDS_INFO'; Payload = $needsInfoPayload },
+            @{ Name = 'DONE';       Payload = $donePayload }
+        )) {
+            $unknownKeys = @(@($sample.Payload.Keys) | Where-Object { $_ -notin $implProps })
+            Check ($unknownKeys.Count -eq 0) "payload $($sample.Name): todas sus claves son properties del schema impl (status/clarifications incluidas)"
+            Check ($statusEnum -contains $sample.Payload.status) "payload $($sample.Name): su status esta permitido por el enum del schema"
+        }
+    } finally {
+        Remove-Item -LiteralPath $implSchemaPath, $reviewSchemaPath, $docsSchemaPath -ErrorAction SilentlyContinue
+    }
+
+    # -- item 5: nuevo parametro -ClarifyOf en el bloque param() --
+    $paramBlock = [regex]::Match($scriptText, '(?s)\bparam\(\s*\r?\n(.*?)\r?\n\)').Groups[1].Value
+    Check ($paramBlock -match '\[string\]\$ClarifyOf') 'param(): declara [string]$ClarifyOf'
+    Check ($paramBlock -match '(?s)\$RetryOf.*\$ClarifyOf') 'param(): $ClarifyOf va junto a $RetryOf'
+
+    # -- item 6: bloque de prompt inyectado reescrito a ingles ASCII --
+    $promptBlock = [regex]::Match($scriptText, '(?s)@"\r?\n(.*?)\r?\n"@').Groups[1].Value
+    Check ($promptBlock -notmatch 'Consulta Engram')   'prompt inyectado: ya no dice "Consulta Engram"'
+    Check ($promptBlock -notmatch '---- TAREA ----')   'prompt inyectado: ya no usa el delimitador "---- TAREA ----"'
+    Check ($promptBlock -match 'Check Engram')          'prompt inyectado: instruye "Check Engram" en ingles'
+    Check ($promptBlock -match 'NEEDS_INFO')            'prompt inyectado: menciona el estado NEEDS_INFO'
+    Check ($promptBlock -match '---- TASK ----')        'prompt inyectado: usa el delimitador "---- TASK ----"'
+    Check ($promptBlock -match '^[\x00-\x7F]*$')        'prompt inyectado: es ASCII puro (guarda, ya verde)'
+
+    # -- item 7: el log de decisiones registra status y clarify_of --
+    $dlIdx = $scriptText.IndexOf('Write-DecisionLog ([ordered]')
+    $decisionLog = if ($dlIdx -ge 0) { $scriptText.Substring($dlIdx) } else { '' }
+    Check ($decisionLog -match '(?m)^\s*status\s*=')     'Write-DecisionLog: incluye la clave status'
+    Check ($decisionLog -match '(?m)^\s*clarify_of\s*=') 'Write-DecisionLog: incluye la clave clarify_of'
+
+    # -- invariante status/blocked/clarifications (D-016), chequeada tras parsear --
+    Check (Test-StatusInvariant $null) 'Test-StatusInvariant: null no aplica (true)'
+    Check (Test-StatusInvariant ([pscustomobject]@{ foo = 1 })) 'Test-StatusInvariant: payload sin status no aplica (true)'
+    Check (Test-StatusInvariant ([pscustomobject]@{ status = 'DONE'; blocked = $false; clarifications = @() })) 'Test-StatusInvariant: DONE limpio cumple'
+    Check (-not (Test-StatusInvariant ([pscustomobject]@{ status = 'DONE'; blocked = $false; clarifications = @(1) }))) 'Test-StatusInvariant: DONE con clarifications viola'
+    Check (Test-StatusInvariant ([pscustomobject]@{ status = 'NEEDS_INFO'; blocked = $false; clarifications = @(1) })) 'Test-StatusInvariant: NEEDS_INFO con una clarification cumple'
+    Check (-not (Test-StatusInvariant ([pscustomobject]@{ status = 'NEEDS_INFO'; blocked = $false; clarifications = @() }))) 'Test-StatusInvariant: NEEDS_INFO sin clarifications viola'
+    Check (-not (Test-StatusInvariant ([pscustomobject]@{ status = 'NEEDS_INFO'; blocked = $true; clarifications = @(1) }))) 'Test-StatusInvariant: NEEDS_INFO con blocked=true viola'
+    Check (Test-StatusInvariant ([pscustomobject]@{ status = 'BLOCKED'; blocked = $true; clarifications = @() })) 'Test-StatusInvariant: BLOCKED con blocked=true cumple'
+    Check (-not (Test-StatusInvariant ([pscustomobject]@{ status = 'BLOCKED'; blocked = $false; clarifications = @() }))) 'Test-StatusInvariant: BLOCKED con blocked=false viola'
+    Check ($scriptText -match '(?m)^if \(\$run\.ExitCode -ne 0\) \{') 'un exit != 0 de codex es fallo aunque haya JSON en -o'
+    Check ($scriptText -match 'Test-StatusInvariant \$payload') 'la invariante se chequea antes de imprimir el resultado'
+
+    # -- -Resume exige -Role explicito (el schema depende del rol) --
+    Check ($scriptText -match "\`$Resume -and -not \`$PSBoundParameters\.ContainsKey\('Role'\)") '-Resume sin -Role sale con error en vez de asumir constructor'
+
     # ------------------- degradacion sin codex instalado: proceso real ---
     # El throw de Get-CodexCommand pasa a nivel de script, ANTES de que exista
     # ninguna funcion que mockear: solo se puede probar en un proceso hijo con

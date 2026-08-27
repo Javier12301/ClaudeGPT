@@ -9,6 +9,30 @@ correspondiente de [`docs/SYSTEM.md`](docs/SYSTEM.md) en el mismo diff.
 
 ### Changed
 
+- **Contrato de delegación a Codex endurecido.** El schema `impl` suma `status`
+  (`DONE` | `NEEDS_INFO` | `BLOCKED`) y `clarifications[]` (`missing_fact`,
+  `evidence_checked`, `question`, `affected_decision`); `blocked` se conserva con
+  invariante (`DONE`/`NEEDS_INFO` → false, `BLOCKED` → true). Codex ahora
+  devuelve `NEEDS_INFO` estructurado —con todas las preguntas juntas— en vez de
+  asumir un hecho del repo no verificado o discutir de a una; sale con exit 0 y
+  sigue siendo elegible para continuación directa de sesión. Todo el texto que el
+  orquestador genera para Codex (spec canónica, prompts de continuación,
+  `codex/Orquestador/AGENTS.md`, `developer_instructions` de los cinco roles del
+  flujo híbrido, prompt inyectado por `codex-run.ps1`) pasa a inglés y
+  ASCII-safe; los literales del repo se preservan exactos. Las continuaciones de
+  `NEEDS_INFO` van por `-PromptFile` (UTF-8 sin BOM) con formato
+  `FACT_RESOLUTION`, no por `-Prompt`. Tope de 2 ciclos de aclaración por tarea,
+  como criterio del orquestador; `-ClarifyOf` lo deja registrado en
+  `.orquestador/decisions.jsonl` sin consumir el presupuesto de retry lógico.
+  Regla compartida verify-before-infer: nunca inventar motor de BD, framework,
+  runner, contrato de API ni decisión de arquitectura; primero la evidencia del
+  repo. El wrapper valida la invariante `status`/`blocked`/`clarifications`
+  después de parsear (`Test-StatusInvariant`) y la trata como contrato violado si
+  no se cumple; un exit ≠ 0 de `codex exec` es fallo aunque haya JSON en `-o`; y
+  `-Resume` ahora exige `-Role` explícito porque el contrato de salida depende
+  del rol. Ver `docs/DECISIONS.md` D-016 y `docs/SYSTEM.md` BR-011..BR-013.
+  Cubierto por `Orquestador/tests/test-codex-run.ps1`.
+
 - **Sandbox de Codex: los roles que escriben van en `danger-full-access`.** Iban 3
   fallos en 4 invocaciones con error 1920: bajo `[windows] sandbox = "elevated"`,
   `workspace-write` deniega las escrituras dentro del propio workspace. Tocar sólo
@@ -18,10 +42,15 @@ correspondiente de [`docs/SYSTEM.md`](docs/SYSTEM.md) en el mismo diff.
   niveles**: `sandbox_mode = "danger-full-access"` + `approval_policy = "never"` en el
   config global, y `danger-full-access` en los cinco roles que escriben
   (`constructor`, `tester-tdd`, `verifier`, `e2e-browser`, `browser-diagnostics`).
-  `explorador`, `reviewer`, `security-reviewer` y `docs-researcher` **siguen en
-  `read-only`**: la barrera de los lectores es el sandbox, no sólo el prompt.
-  `verify.ps1` chequea ambos niveles. El wrapper sigue sin pasar nunca
+  Los roles lectores (`explorador`, `reviewer`, `security-reviewer`,
+  `docs-researcher`) **también van `danger-full-access`**: bajo
+  `[windows] sandbox = "elevated"` el modo `read-only` tampoco arranca `git` ni
+  `rg` (`CreateProcessAsUserW` error 1920), así que su barrera pasa a ser el
+  prompt más `agents.enabled=false`, igual que `verifier`. `verify.ps1` exige
+  `danger-full-access` en los nueve roles; `install.ps1` avisa si alguno no lo
+  está. El wrapper sigue sin pasar nunca
   `--dangerously-bypass-approvals-and-sandbox`: esto es config declarada, por rol.
+  Ver `docs/DECISIONS.md` D-017.
 
 ### Fixed
 

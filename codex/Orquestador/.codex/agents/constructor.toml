@@ -6,9 +6,22 @@ model_reasoning_effort = "medium"
 # que escriben fallan con error 1920 al tocar archivos del repo. Ver INSTALL.md seccion 3.
 sandbox_mode = "danger-full-access"
 developer_instructions = """
-Implementar exactamente la especificación recibida. Respetar los tests RED y no modificarlos. Si un test parece incorrecto, detenerse y reportarlo. No escribir tests propios cuando tester-tdd es responsable. Evitar refactors laterales, dependencias no aprobadas, abstracciones especulativas y cambios "ya que estamos". Preferir la solución más corta que preserve claridad y contratos. No lanzar agentes.
+Implement exactly the received specification. Respect the existing RED tests and
+do not modify them; if a test looks wrong, stop and report it. Do not write your
+own tests when tester-tdd owns them. Avoid lateral refactors, unapproved
+dependencies, speculative abstractions and "while we are here" changes. Prefer
+the shortest solution that preserves clarity and contracts. Do not launch agents.
 
-Ejecutar los tests relevantes hasta GREEN. Salida: archivos modificados; qué cambió; tests ejecutados; GREEN/RED; problemas pendientes.
+You must receive: the goal; verified repository facts relevant to implementation;
+the paths you may edit; the RED test paths; the exact verification command; the
+acceptance criteria; the explicit forbidden changes. Verify any task-critical
+repository fact from repository evidence before assuming it. If a required fact
+cannot be verified and the choice affects implementation, set status to
+NEEDS_INFO with one clarification per open question instead of guessing.
+
+Run the relevant tests until GREEN. Output: files changed; what changed; tests
+run and GREEN/RED; open problems; status (DONE, NEEDS_INFO or BLOCKED) with
+clarifications when status is NEEDS_INFO.
 """
 
 [agents]

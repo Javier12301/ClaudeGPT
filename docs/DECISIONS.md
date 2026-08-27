@@ -596,3 +596,116 @@ porque ahí sí puede haber más de un job.
 
 ### Referencias
 ROADMAP.md Fase 3 · INSTALL-HIBRIDO.md § 6 (test 16) y § 8 · CHANGELOG.md
+
+## D-016 — Estados de resultado estructurados y tope de aclaraciones
+
+Estado: Aceptada
+Fecha: 2026-08-26
+
+### Contexto
+Las delegaciones a Codex funcionaban pero salían "muy discutidas": Codex infería
+hechos del repo que no había verificado (un motor de BD, un runner de tests),
+implementaba contra el supuesto equivocado, y el RED que seguía disparaba un
+reintento. Cuando sí preguntaba, preguntaba de a un hecho por vez, y cada round
+trip costaba una corrida entera. El único canal de "no pude" era el booleano
+`blocked`, que no distingue "me falta un dato" de "se cayó el build".
+
+### Opciones consideradas
+A. Dejar todo en el prompt: pedirle a Codex que "pregunte si tiene dudas", sin
+   contrato.
+B. `status = DONE | NEEDS_INFO | BLOCKED` en el schema `impl` + `clarifications[]`
+   estructurado, con el tope de ciclos como estado del wrapper.
+C. Igual que B pero con el tope como criterio del orquestador y un `-ClarifyOf`
+   solo para el log, sin estado persistente en el wrapper.
+
+### Decisión
+C. `status` y `clarifications` entran al schema `impl` (lo comparten
+`constructor`, `tester-tdd` y `verifier`); `blocked` se conserva con invariante.
+El tope de 2 ciclos lo aplica el orquestador; el wrapper solo registra
+`clarify_of`.
+
+### Motivo
+El schema fuerza el contrato donde el prompt no puede (A no es verificable). El
+tope como estado del wrapper (B) contradice `D-014`/`D-015`: el wrapper es
+stateless a propósito — cada corrida es una llamada, no un job con memoria.
+`-ClarifyOf` replica exactamente lo que ya hace `-RetryOf`: no cambia el
+protocolo, deja el ciclo observable en `decisions.jsonl`, y la decisión de parar
+queda donde está el criterio, que es el orquestador. Separar `NEEDS_INFO` del
+presupuesto de retry evita que una ambigüedad legítima queme un intento lógico.
+
+El texto que se genera para Codex pasa a inglés y ASCII-safe: PowerShell 5.1
+emite en el codepage OEM y Codex rechaza stdin que no sea UTF-8 válido; los
+literales del repo se preservan exactos porque asciificar un path o un nombre de
+test rompe el trabajo. La comunicación con el usuario no cambia de idioma.
+
+### Consecuencias
+- `NEEDS_INFO` sale con exit 0 y `blocked=false`: sigue siendo reusable para
+  continuación directa por las reglas de tamaño de rollout.
+- La continuación va por `-PromptFile` (archivo UTF-8 sin BOM), no por
+  `-Prompt "<texto>"`: mismo motivo de encoding que el prompt principal, que ya
+  entra por stdin.
+- El schema `impl` cambia para los tres roles que lo comparten; `review` y `docs`
+  quedan intactos.
+- El tope de ciclos no es verificable contra código: es criterio, como el resto
+  de la "Disciplina del orquestador".
+
+### Referencias
+docs/SYSTEM.md BR-011..BR-013 · D-014 · D-015 · CHANGELOG.md ·
+Orquestador/skills/orquestador/SKILL.md
+
+## D-017 — Todos los roles Codex en `danger-full-access` en Windows
+
+Estado: Aceptada
+Fecha: 2026-08-26
+
+### Contexto
+El commit `411462b` movió los cinco roles que escriben (`constructor`,
+`tester-tdd`, `verifier`, `e2e-browser`, `browser-diagnostics`) a
+`danger-full-access` porque bajo `[windows] sandbox = "elevated"` el modo
+`workspace-write` deniega las escrituras dentro del repo (error 1920). Dejó a los
+cuatro roles lectores (`explorador`, `reviewer`, `security-reviewer`,
+`docs-researcher`) en `read-only`, con la idea de que "la barrera de los lectores
+es el sandbox, no sólo el prompt".
+
+La primera invocación real de `reviewer` sobre un diff mostró que esa barrera no
+es funcional en este entorno: bajo `elevated`, el modo `read-only` tampoco puede
+lanzar procesos hijo. Codex falla con `CreateProcessAsUserW` error 1920 al
+intentar ejecutar `git diff` o `rg`, y devuelve "no pude verificar" sin haber
+podido leer nada.
+
+### Opciones consideradas
+A. Dejar los lectores en `read-only` y aceptar que en Windows `elevated` no
+   pueden ejecutar comandos (reviewer inútil).
+B. Bajar el sandbox nativo a `unelevated`.
+C. Mover los cuatro roles lectores a `danger-full-access`, igual que los que
+   escriben; la barrera de los lectores pasa a ser el prompt más
+   `agents.enabled=false`.
+
+### Decisión
+C. Los nueve roles del kit se declaran `danger-full-access` en su `.toml`.
+
+### Motivo
+A deja el flujo con un `reviewer` que no puede hacer su trabajo. B cambia el
+sandbox nativo para todo el kit por un caso de borde y arriesga regresiones en
+los roles que escriben, que ya estaban resueltos. C usa el patrón que ya
+funciona: `verifier` corre `danger-full-access` con barrera de prompt desde el
+commit anterior y nunca editó fuera de lo pedido. El permiso sigue siendo config
+declarada por rol en `~/.codex/agents/<rol>.toml`, auditable y verificada por
+`verify.ps1`; no es el flag `--dangerously-bypass-approvals-and-sandbox`, que
+sigue sin usarse.
+
+### Consecuencias
+- Para los roles lectores, la única barrera contra escritura es el prompt ("review
+  without editing") y `agents.enabled=false`. El diff se sigue evaluando en
+  Claude, que es el árbitro final.
+- `verify.ps1` deja de distinguir roles lectores y escritores: exige
+  `danger-full-access` en los nueve.
+- `install.ps1` copia los `.toml` tal cual y avisa si alguno no está en
+  `danger-full-access`. El fix viaja con el kit a cualquier repo que reinstale.
+- En un entorno sin `[windows] sandbox = "elevated"`, `read-only` volvería a
+  funcionar; la decisión es específica de Windows elevated y así queda anotada.
+
+### Referencias
+docs/SYSTEM.md § Invariantes del wrapper y § Windows · D-002 · commit `411462b` ·
+codex/Orquestador/verify.ps1 · codex/Orquestador/install.ps1 ·
+INSTALL-HIBRIDO.md § troubleshooting

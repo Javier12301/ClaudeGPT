@@ -110,9 +110,12 @@ function Merge-CodexConfig {
 
     Set-TopLevelTomlKey $lines 'model' '"gpt-5.6-sol"'
     Set-TopLevelTomlKey $lines 'model_reasoning_effort' '"medium"'
-    # danger-full-access + never: el sandbox de Windows ('elevated') deniega escrituras
-    # dentro del repo bajo workspace-write y Codex muere con error 1920. El wrapper
-    # sigue SIN pasar --dangerously-bypass-approvals-and-sandbox: el permiso es config.
+    # danger-full-access + never: bajo [windows] sandbox = "elevated" ni workspace-write
+    # ni read-only pueden lanzar procesos hijo y Codex muere con error 1920 (los roles
+    # que escriben al tocar el repo, los lectores al invocar git o rg). Por eso los NUEVE
+    # roles .toml se copian tal cual en danger-full-access; no revertir ninguno a
+    # read-only. El wrapper sigue SIN pasar --dangerously-bypass-approvals-and-sandbox:
+    # el permiso es config declarada por rol, auditable en ~/.codex/agents/<rol>.toml.
     Set-TopLevelTomlKey $lines 'sandbox_mode' '"danger-full-access"'
     Set-TopLevelTomlKey $lines 'approval_policy' '"never"'
     Set-TomlSectionKey $lines 'agents' 'enabled' 'true'
@@ -219,6 +222,12 @@ foreach ($file in Get-ChildItem -LiteralPath $agentSource -Filter '*.toml') {
     $destination = Join-Path $agentTarget $file.Name
     Backup-ItemIfPresent $destination
     Copy-OwnedFile $file.FullName $destination
+    # Los .toml traen sandbox_mode = "danger-full-access" para los nueve roles: bajo
+    # [windows] sandbox = "elevated" read-only tampoco puede lanzar git/rg (error 1920).
+    $tomlText = [IO.File]::ReadAllText($destination)
+    if ($tomlText -notmatch '(?m)^sandbox_mode\s*=\s*"danger-full-access"\s*$') {
+        Write-Warning "$($file.Name): sandbox_mode no es danger-full-access; bajo Windows elevated el rol fallara con error 1920."
+    }
 }
 
 if ($WithSerena) {

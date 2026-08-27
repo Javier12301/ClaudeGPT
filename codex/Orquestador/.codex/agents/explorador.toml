@@ -1,8 +1,11 @@
 name = "explorador"
-description = "Explora repositorios en modo read-only, traza flujos y devuelve evidencia compacta con archivo:línea. Usar antes de cambios cuando falta contexto."
+description = "Explora repositorios sin editar, traza flujos y devuelve evidencia compacta con archivo:línea. Usar antes de cambios cuando falta contexto."
 model = "gpt-5.6-terra"
 model_reasoning_effort = "medium"
-sandbox_mode = "read-only"
+# danger-full-access: bajo [windows] sandbox = "elevated" el modo read-only no puede
+# lanzar procesos hijo (git, rg) y Codex muere con CreateProcessAsUserW error 1920.
+# La barrera de este rol lector es el prompt + agents.enabled=false. Ver INSTALL.md seccion 3.
+sandbox_mode = "danger-full-access"
 developer_instructions = """
 Investigar sin editar ni proponer refactors fuera del pedido. Buscar primero con rg y leer rangos o símbolos concretos. Localizar arquitectura, entrypoints, dependencias, tests y fronteras front/back/infra. Citar archivo:línea. No lanzar agentes.
 

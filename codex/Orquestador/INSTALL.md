@@ -52,20 +52,23 @@ Revisá y confiá el hook desde `/hooks`, luego iniciá una sesión nueva.
 ## 3. Configuración aplicada
 
 - Principal: `gpt-5.6-sol`, reasoning Medium.
-- Sandbox: `danger-full-access` con approvals `never` para los cinco roles que
-  escriben (`constructor`, `tester-tdd`, `verifier`, `e2e-browser`,
-  `browser-diagnostics`). Los otros cuatro (`explorador`, `reviewer`,
-  `security-reviewer`, `docs-researcher`) siguen en `read-only`: su barrera es el
-  sandbox, no sólo las instrucciones del rol.
+- Sandbox: `danger-full-access` con approvals `never` para los **nueve** roles
+  del kit. Los que escriben (`constructor`, `tester-tdd`, `verifier`,
+  `e2e-browser`, `browser-diagnostics`) lo necesitan para tocar el repo; los
+  lectores (`explorador`, `reviewer`, `security-reviewer`, `docs-researcher`)
+  también, porque en Windows `elevated` el modo `read-only` no arranca ni `git`
+  ni `rg`. Su barrera es el prompt más `agents.enabled=false`.
 
-  Por qué: bajo `[windows] sandbox = "elevated"`, `workspace-write` deniega las
-  escrituras dentro del propio repo y Codex muere con error 1920. Hay que tocar
-  **los dos niveles** — `~/.codex/config.toml` y cada `~/.codex/agents/<rol>.toml` —
-  porque `codex-run.ps1` pasa el sandbox explícito por línea de comandos (`-s`), y
-  un flag de CLI le gana siempre al config global.
+  Por qué: bajo `[windows] sandbox = "elevated"`, ni `workspace-write` ni
+  `read-only` pueden lanzar el proceso hijo — Codex muere con
+  `CreateProcessAsUserW` error 1920. Hay que tocar **los dos niveles** —
+  `~/.codex/config.toml` y cada `~/.codex/agents/<rol>.toml` — porque
+  `codex-run.ps1` pasa el sandbox explícito por línea de comandos (`-s`), y un
+  flag de CLI le gana siempre al config global.
 
-  Esto **no** es `--dangerously-bypass-approvals-and-sandbox`: el permiso se declara
-  en config, el wrapper sigue sin pasar ese flag nunca.
+  Esto **no** es `--dangerously-bypass-approvals-and-sandbox`: el permiso se
+  declara en config por rol, el wrapper sigue sin pasar ese flag nunca. Ver
+  `docs/DECISIONS.md` D-017.
 - Windows: sandbox nativo `elevated`; usar `unelevated` sólo si políticas corporativas bloquean el modo recomendado.
 - Concurrencia: cuatro subagentes como máximo.
 - Status line nativa con modelo, reasoning, contexto, límites y branch.

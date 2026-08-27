@@ -410,10 +410,71 @@ qué NO hacer
 Nunca le mandes: historial del chat, archivos completos, tus razonamientos, logs
 largos, salidas de test irrelevantes.
 
+### Idioma y ASCII de lo que generás para Codex
+
+Todo spec y todo prompt de continuación que generás para Codex va en **inglés** y
+**ASCII-safe**: sin acentos, comillas tipográficas, flechas Unicode, emojis ni
+puntuación decorativa. Los **literales del repo** —paths, identificadores,
+strings de código, nombres de test, valores de API— se copian **exactos**, sin
+"asciificar". Tu conversación con el usuario sigue en el idioma del usuario.
+
+### Plantilla canónica del spec
+
+Cada tarea nueva a Codex se compila a esta estructura, autocontenida:
+
+```text
+TASK
+Short task name.
+
+GOAL
+Observable result expected from this delegation.
+
+VERIFIED REPOSITORY FACTS
+- Only facts verified from repository evidence.
+- Database:
+- Framework:
+- Relevant implementation pattern:
+- Package/test tooling:
+- Other task-critical facts:
+
+FILE SCOPE
+May read:
+May edit:
+Must not edit:
+
+ACCEPTANCE CRITERIA
+-
+
+TESTS
+- Path:
+- Exact command:
+- Expected result:
+
+CONSTRAINTS
+-
+
+DO NOT
+- Do not modify existing RED tests.
+- Do not add unrelated dependencies.
+- Do not perform lateral refactors.
+- Do not introduce technologies not verified in the repository.
+- Do not infer architecture from generic conventions.
+
+UNCERTAINTY PROTOCOL
+Verify from repository evidence before making assumptions.
+If a required fact cannot be verified, return NEEDS_INFO before making a
+decision that depends on it.
+```
+
 ### Qué te devuelve
 
 10–20 líneas con contrato forzado por JSON Schema. Si necesitás más evidencia,
 **leé `git diff` vos mismo** — es gratis y no pasa por el contexto de Codex.
+
+El contrato `impl` trae además `status` (`DONE` | `NEEDS_INFO` | `BLOCKED`) y
+`clarifications`. Invariante: `DONE` y `NEEDS_INFO` van con `blocked=false`;
+`BLOCKED` con `blocked=true`. `DONE` ⇒ `clarifications` vacío; `NEEDS_INFO` ⇒ al
+menos una. `NEEDS_INFO` sale con exit 0.
 
 ### TDD híbrido
 
@@ -449,6 +510,43 @@ cuando el security review necesita su propia sesión y su propio foco.
 Los findings **se evalúan uno por uno con evidencia**. Nunca aceptes un finding
 porque "lo dijeron dos modelos": vos sos el árbitro final y verificás en el código.
 
+### Flujo NEEDS_INFO
+
+Cuando Codex devuelve `NEEDS_INFO`:
+
+1. Leés los hechos que pide.
+2. Los resolvés desde evidencia del repo o decisiones que el usuario ya tomó.
+   **No** preguntás al usuario si ya tenés evidencia suficiente.
+3. Respondés a Codex **solo con hechos**, sin discutir por qué su interpretación
+   anterior estaba mal salvo que haga falta para avanzar.
+4. Reanudás la **misma** sesión si las reglas de reuso lo permiten.
+5. Continuás la tarea original.
+
+La continuación va por `-PromptFile` (archivo temporal UTF-8 sin BOM), **no** por
+`-Prompt "<texto>"`, con formato `FACT_RESOLUTION`:
+
+```text
+FACT_RESOLUTION
+
+database_engine: MySQL
+evidence: path/to/application.properties
+
+Continue the original task.
+All previous constraints remain unchanged.
+```
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File ~/.claude/scripts/codex-run.ps1 `
+  -Resume <session-id> -Role <rol> -PromptFile <continuation-spec.md> -ClarifyOf <session-id> `
+  -Repo <repo> -Task "<nombre corto>"
+```
+
+**Tope: 2 ciclos de `NEEDS_INFO` por tarea/spec.** Pasado el segundo sin
+resolver: dejás de reanudar en automático, revisás el spec/contrato, lo corregís
+o lo enriquecés, y decidís si arrancás una tarea Codex nueva o cerrás por otra
+vía. `NEEDS_INFO` **no** es un RED lógico y **no** consume el presupuesto de
+retry: se registra con `-ClarifyOf`, no con `-RetryOf`.
+
 ### Un solo escritor
 
 **Nunca** corras el `constructor` de Claude y un executor de Codex sobre el mismo
@@ -467,14 +565,16 @@ supere al de hacerlo vos. Codex no se usa por ritual.
 Una sesión de Codex ya cargada con el contexto de una tarea es un activo.
 Reusarla para continuar cuesta un prompt corto; tirarla obliga a re-explicar todo.
 
-**Reusá** (`-Resume <SESSION_ID> -Prompt "<delta>"`) cuando se cumplan las tres:
+**Reusá** (`-Resume <SESSION_ID> -Role <rol> -PromptFile <delta.md>`) cuando se
+cumplan las tres:
 
 1. **Continuidad real** — misma tarea, mismos archivos, misma spec: faltan N
    líneas, los tests quedaron RED, el verifier encontró un error en el código que
    ese mismo executor escribió, o el reviewer pide una aclaración.
 2. **Sesión liviana** — el wrapper lo dice solo (`REUSE-OK` / `REUSE-IF-DIRECT` /
    `REUSE-DENIED`). Consultable con `-SessionInfo <id>`.
-3. **La corrida anterior terminó sana** — exit 0 y `blocked: false`.
+3. **La corrida anterior terminó sana** — exit 0 y `blocked: false`. Un
+   `NEEDS_INFO` sano cuenta como terminada sana.
 
 **Arrancá de cero** si: es otra tarea, cambió el contrato, cambia el rol, cambia
 el sandbox, el wrapper devuelve `REUSE-DENIED`, o el working tree cambió por

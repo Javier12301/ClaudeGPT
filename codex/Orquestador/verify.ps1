@@ -23,10 +23,10 @@ function Get-McpServerSection {
 }
 
 $agentNames = @('explorador', 'tester-tdd', 'constructor', 'reviewer', 'security-reviewer', 'docs-researcher', 'verifier', 'e2e-browser', 'browser-diagnostics')
-# Roles que escriben. Van en danger-full-access: bajo [windows] sandbox = "elevated",
-# workspace-write deniega las escrituras dentro del repo y Codex muere con error 1920.
-# El resto sigue read-only: la barrera de los lectores es el sandbox, no solo el prompt.
-$writerRoles = @('constructor', 'tester-tdd', 'verifier', 'e2e-browser', 'browser-diagnostics')
+# Todos los roles van en danger-full-access. Bajo [windows] sandbox = "elevated" ni
+# workspace-write ni read-only pueden lanzar procesos hijo: Codex muere con error 1920
+# (los que escriben al tocar el repo, los lectores al invocar git o rg). La barrera de
+# los roles lectores pasa a ser el prompt + agents.enabled=false, igual que verifier.
 $skillNames = @('constructor', 'revisor-completo')
 $base = if ($Global) { $CodexHome } else { Join-Path $KitRoot '.codex' }
 $skillsBase = if ($Global) { $SkillsHome } else { Join-Path $KitRoot '.agents\skills' }
@@ -56,8 +56,7 @@ foreach ($name in $agentNames) {
 
         # El -s de la linea de comandos le gana al config global, asi que este es el
         # nivel que decide: codex-run.ps1 lee sandbox_mode de aca (Get-RoleConfig).
-        $expectedSandbox = if ($writerRoles -contains $name) { 'danger-full-access' } else { 'read-only' }
-        Check ($content -match "(?m)^sandbox_mode\s*=\s*""$expectedSandbox""\s*$") "$name en sandbox $expectedSandbox"
+        Check ($content -match '(?m)^sandbox_mode\s*=\s*"danger-full-access"\s*$') "$name en sandbox danger-full-access"
 
         $expectedMcpServers = @('context7', 'serena', 'playwright', 'chrome-devtools')
         $actualMcpServers = @([regex]::Matches($content, '(?m)^\[mcp_servers\.([^\]]+)\]\s*$') | ForEach-Object { $_.Groups[1].Value })

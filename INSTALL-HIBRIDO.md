@@ -471,9 +471,11 @@ Si ahí aparece, el `PSModulePath` es la causa.
 intérpretes instalados desde la Microsoft Store (`WindowsApps\python.exe`). Instalá
 Python desde python.org. Codex marca `tests: NOT_RUN` en vez de inventar un GREEN.
 
-**Codex falla con error 1920 al escribir en el repo.** El rol quedó en
-`sandbox_mode = "workspace-write"`. Bajo `[windows] sandbox = "elevated"` eso deniega
-las escrituras dentro del propio workspace. Los cinco roles que escriben van en
+**Codex falla con `CreateProcessAsUserW` error 1920.** El rol quedó en
+`sandbox_mode = "workspace-write"` o `"read-only"`. Bajo `[windows] sandbox = "elevated"`
+ninguno de los dos puede lanzar el proceso hijo: los que escriben fallan al tocar el
+repo, los lectores (`reviewer`, `security-reviewer`, `docs-researcher`, `explorador`)
+al invocar `git` o `rg`. Los nueve roles del kit van en
 `danger-full-access`; corré `codex\Orquestador\install.ps1` de nuevo, o verificá con
 `codex\Orquestadorerify.ps1 -Global`. Ojo: no alcanza con tocar
 `~/.codex/config.toml`, porque `codex-run.ps1` pasa el sandbox por `-s` desde
