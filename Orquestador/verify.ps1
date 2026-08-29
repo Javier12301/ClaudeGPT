@@ -65,6 +65,12 @@ foreach ($skill in @('orquestador', 'brainstorming', 'documentacion')) {
 foreach ($agent in @('explorador', 'tester', 'constructor')) {
     Check (Test-Path (Join-Path $ClaudeHome "agents/$agent.md")) "agent $agent presente"
 }
+# El core de la skill delega el detalle a references/: si no se instalaron, el
+# orquestador queda con punteros a archivos que no existen.
+foreach ($ref in @('routing', 'codex', 'docs-matrix', 'capsule', 'retro')) {
+    Check (Test-Path (Join-Path $ClaudeHome "skills/orquestador/references/$ref.md")) `
+          "reference $ref.md presente"
+}
 
 # --- el puente a Codex ---
 $wrapper = Join-Path $ClaudeHome 'scripts/codex-run.ps1'
@@ -100,8 +106,14 @@ foreach ($agent in Get-ChildItem -LiteralPath (Join-Path $KitRoot 'agents') -Fil
 }
 foreach ($f in @(
     @{ Rel = 'scripts/codex-run.ps1';   Label = 'wrapper codex-run.ps1' },
-    @{ Rel = 'hooks/git-guard.ps1';     Label = 'hook git-guard.ps1' }
+    @{ Rel = 'hooks/git-guard.ps1';     Label = 'hook git-guard.ps1' },
+    @{ Rel = 'hooks/orq-metrics.ps1';   Label = 'hook orq-metrics.ps1' }
 )) { $pairs += @{ Repo = (Join-Path $KitRoot $f.Rel); Inst = (Join-Path $ClaudeHome $f.Rel); Label = $f.Label } }
+foreach ($ref in (Get-ChildItem -LiteralPath (Join-Path $KitRoot 'skills/orquestador/references') -Filter '*.md' -ErrorAction SilentlyContinue)) {
+    $pairs += @{ Repo  = $ref.FullName
+                 Inst  = (Join-Path $ClaudeHome "skills/orquestador/references/$($ref.Name)")
+                 Label = "reference $($ref.Name)" }
+}
 $pairs += @{ Repo  = (Join-Path $KitRoot 'statusline-wrapper.ps1')
              Inst  = (Join-Path $ClaudeHome 'statusline-wrapper.ps1')
              Label = 'statusline-wrapper.ps1' }
@@ -129,6 +141,13 @@ if (Test-Path $settings) {
         (@($_.hooks | ForEach-Object { [string]$_.command }) -join ' ') -match 'git-guard\.ps1'
     }).Count
     Check ($guardCount -eq 1) 'el hook git-guard esta registrado una sola vez'
+
+    $postCmds = @($doc.hooks.PostToolUse | ForEach-Object { $_.hooks | ForEach-Object { [string]$_.command } }) -join ' '
+    Check ($postCmds -match 'orq-metrics\.ps1') 'settings registra el hook de metricas en PostToolUse'
+    $metricCount = @(@($doc.hooks.PreToolUse) + @($doc.hooks.PostToolUse) | Where-Object {
+        (@($_.hooks | ForEach-Object { [string]$_.command }) -join ' ') -match 'orq-metrics\.ps1'
+    }).Count
+    Check ($metricCount -eq 2) 'el hook de metricas esta registrado en sus dos eventos, sin duplicados'
 }
 
 # --- statusline: duro, es la fuente de la cuota de Claude ---

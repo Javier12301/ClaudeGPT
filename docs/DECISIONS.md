@@ -709,3 +709,124 @@ sigue sin usarse.
 docs/SYSTEM.md § Invariantes del wrapper y § Windows · D-002 · commit `411462b` ·
 codex/Orquestador/verify.ps1 · codex/Orquestador/install.ps1 ·
 INSTALL-HIBRIDO.md § troubleshooting
+
+---
+
+## D-018 — Delegar por costo del ciclo, no por tamaño del diff
+
+Estado: Aceptada
+Fecha: 2026-08-28
+
+### Contexto
+Dos días de uso real produjeron un resultado bueno por un camino lento. La sesión
+documentada en `MEJORAR ORQUESTADOR/FEEDBACK-ORQUESTADOR.md` cerró con once
+delegaciones, tres `NEEDS_INFO` predecibles, doce corridas de suite completa
+(~20 minutos de espera) y 248 mil tokens en tres `Explore` que produjeron un mapa
+que el orquestador ya tenía a medias.
+
+La regla vigente era "un fix directo se limita a ~50 líneas; por encima se
+delega". Mide el tamaño del diff, que es lo que no hay que medir: delegar tiene un
+piso de varios minutos —escribir la spec, esperar el spawn, revisar, corregir—
+que un cambio mediano no amortiza, tenga treinta líneas o doscientas. De las once
+delegaciones, tres pagaron claramente, una no pagó y una pagó a medias.
+
+### Opciones consideradas
+A. Subir el umbral de líneas.
+B. Reemplazar el umbral por una decisión explícita `DIRECT` / `DELEGATE` /
+   `PARALLELIZE` con `DIRECT` como default.
+C. Quitar la revisión del diff por el Tech Lead, que es donde se iba el tiempo
+   restante.
+
+### Decisión
+B. Ante cada tarea y subtarea, la primera decisión es una de tres, y delegar es
+la excepción que hay que justificar. La implementación se delega cuando el cambio
+toca más de tres archivos o necesita código que el orquestador no tiene en
+contexto.
+
+C queda descartada explícitamente: la revisión del diff produjo los cinco
+defectos que la sesión encontró, y ninguno lo atrapó un test. Sacarla acelera la
+sesión y la hace entregar bugs en verde.
+
+### Motivo
+El valor de delegar no es ahorrar tipeo: es que **alguien que no sea el
+orquestador** haga el trabajo. Eso vale para tres cosas —implementaciones grandes
+contra un contrato congelado, los tests en RED, y la revisión adversarial— y no
+vale para nada más. En todo lo demás, el ciclo de delegación cuesta más de lo que
+produce.
+
+### Consecuencias
++ Los fixes sobre trabajo delegado los aplica el orquestador, sin spawn nuevo.
++ El TDD pasa a ser por riesgo: presentacional sin test nuevo, comportamiento
+  acotado con un RED escrito por el orquestador, y pipeline completo solo para
+  regla de negocio, cálculo, persistencia, validación, permisos, estados y
+  contratos.
+- El orquestador absorbe más trabajo y consume más de su propia ventana. Lo cubre
+  el estado `CODEX-PREFERRED`, que sigue vigente sin cambios.
+- Es el cambio que más defensa saca. La mitigación es que la frontera se define
+  por categoría de riesgo y no por tamaño, y que la revisión del diff corre en las
+  tres rutas.
+
+### Referencias
+docs/SYSTEM.md § Disciplina del orquestador · D-001 ·
+MEJORAR ORQUESTADOR/FEEDBACK-ORQUESTADOR.md § 4.8 y § 5
+
+---
+
+## D-019 — El contrato de frenar es replicable, no del proveedor
+
+Estado: Aceptada
+Fecha: 2026-08-28
+
+### Contexto
+La diferencia más cara entre Codex y los subagentes Claude no era la calidad del
+trabajo: era qué hacían al toparse con una ambigüedad. Codex frena y devuelve
+`NEEDS_INFO` sin tocar un archivo —seis de seis veces correctamente, entre dos
+sesiones—. Los subagentes Claude decidían, escribían, y lo contaban en un párrafo
+al final del resumen, con el trabajo ya hecho.
+
+Costo medido en una sola sesión: el `tester` decidió que una tabla leyera un
+snapshot congelado, lo que habría hecho invisibles las correcciones manuales del
+operador — once minutos de trabajo tirados más cinco de corrección. El
+`constructor` decidió no relajar una validación con un argumento correcto pero
+incompleto. Responder esas dos preguntas habría costado un minuto cada una.
+
+La hipótesis intuitiva era que la ventaja de Codex venía de la reutilización de
+sesión. Resultó falsa: la sesión llegó a `REUSE-DENIED` por tamaño a los dos
+turnos y la segunda continuación arrancó de cero igual.
+
+### Opciones consideradas
+A. Adoptar Agent Teams para tener comunicación padre-hijo.
+B. Dar a `tester` y `constructor` el mismo contrato de frenar, con `SendMessage`
+   para continuar.
+C. Aceptar el comportamiento actual y confiar en la revisión del diff.
+
+### Decisión
+B. `tester` y `constructor` devuelven `NEEDS_INFO` sin escribir un solo archivo
+ante una ambigüedad que cambie el diseño. El orquestador resuelve el hecho desde
+evidencia y responde con `SendMessage` al mismo subagente, solo con el delta.
+
+### Motivo
+La investigación contra la documentación y los contratos de herramienta de la
+versión instalada devuelve **PARTIALLY_SUPPORTED**, a favor: `SendMessage`
+continúa un subagente propio **con su contexto intacto**, y `ListAgents` los
+enumera. Lo que no existe es que el hijo empuje un mensaje al padre a mitad de
+ejecución — tiene que terminar su turno. Eso alcanza: el subagente termina
+devolviendo `NEEDS_INFO`, y la continuación no reconstruye la spec.
+
+Agent Teams (opción A) agregaría un modelo de coordinación entero para un
+problema que ya está resuelto. C es lo que veníamos haciendo, y cuesta una ronda
+completa cada vez que falla.
+
+### Consecuencias
++ La defensa contra una decisión de diseño equivocada deja de ser una sola —el
+  orquestador leyendo el diff después— y pasa a haber dos.
++ Es más barato que el equivalente en Codex, que pierde la sesión por tamaño.
+- Riesgo de que se use para trivialidades y agregue viajes. Mitigado con la lista
+  explícita de qué **no** califica: nombres internos, helpers, orden de funciones,
+  organización local.
+- El emparejamiento start/end de las métricas es aproximado con spawns paralelos
+  del mismo tipo: el payload del hook no trae un id de invocación.
+
+### Referencias
+docs/SYSTEM.md § BR-014 y § BR-015 · D-016 ·
+MEJORAR ORQUESTADOR/FEEDBACK-ORQUESTADOR.md § 4.1 · Orquestador/agents/*.md

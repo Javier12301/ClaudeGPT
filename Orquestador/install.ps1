@@ -83,7 +83,17 @@ function Merge-Settings {
         'powershell -NoProfile -ExecutionPolicy Bypass -File'
     } else { 'pwsh -NoProfile -File' }
     Set-Prop $snippet.statusLine 'command' "$runner ~/.claude/statusline-wrapper.ps1"
-    Set-Prop $snippet.hooks.PreToolUse[0].hooks[0] 'command' "$runner ~/.claude/hooks/git-guard.ps1"
+    # El runner se reescribe en todos los hooks del snippet, no en uno fijo:
+    # fuera de Windows es `pwsh -NoProfile -File`, y son varios.
+    foreach ($event in $snippet.hooks.PSObject.Properties) {
+        foreach ($group in @($event.Value)) {
+            foreach ($h in @($group.hooks)) {
+                if ([string]$h.command -match '([\w-]+\.ps1)\s*$') {
+                    Set-Prop $h 'command' "$runner ~/.claude/hooks/$($Matches[1])"
+                }
+            }
+        }
+    }
     $snippet.permissions.allow = @("Bash($runner ~/.claude/scripts/codex-run.ps1:*)")
     Backup-ItemIfPresent $target
 
@@ -112,16 +122,20 @@ function Merge-Settings {
     }
     Set-Prop $doc 'permissions' $perms
 
-    # hooks.PreToolUse: se saca cualquier git-guard previo antes de agregar el
-    # nuestro, para que reinstalar no acumule duplicados.
+    # hooks: por cada evento del snippet se sacan los grupos que apuntan a un
+    # hook nuestro antes de agregar los nuevos, para que reinstalar no acumule
+    # duplicados. Los hooks del usuario en esos mismos eventos quedan intactos.
+    $ours = 'git-guard\.ps1|orq-metrics\.ps1'
     $hooks = if ($doc.PSObject.Properties.Name -contains 'hooks') { $doc.hooks } else { [pscustomobject]@{} }
-    $groups = @()
-    if ($hooks.PreToolUse) { $groups = @($hooks.PreToolUse) }
-    $groups = @($groups | Where-Object {
-        (@($_.hooks | ForEach-Object { [string]$_.command }) -join ' ') -notmatch 'git-guard\.ps1'
-    })
-    $groups += @($snippet.hooks.PreToolUse)
-    Set-Prop $hooks 'PreToolUse' $groups
+    foreach ($event in $snippet.hooks.PSObject.Properties) {
+        $groups = @()
+        if ($hooks.$($event.Name)) { $groups = @($hooks.$($event.Name)) }
+        $groups = @($groups | Where-Object {
+            (@($_.hooks | ForEach-Object { [string]$_.command }) -join ' ') -notmatch $ours
+        })
+        $groups += @($event.Value)
+        Set-Prop $hooks $event.Name $groups
+    }
     Set-Prop $doc 'hooks' $hooks
 
     # Plugins y marketplaces se agregan sin sacar los del usuario.
@@ -164,6 +178,7 @@ foreach ($agent in Get-ChildItem -LiteralPath (Join-Path $KitRoot 'agents') -Fil
 }
 Copy-OwnedFile (Join-Path $KitRoot 'scripts/codex-run.ps1')  (Join-Path $ClaudeHome 'scripts/codex-run.ps1')
 Copy-OwnedFile (Join-Path $KitRoot 'hooks/git-guard.ps1')    (Join-Path $ClaudeHome 'hooks/git-guard.ps1')
+Copy-OwnedFile (Join-Path $KitRoot 'hooks/orq-metrics.ps1')  (Join-Path $ClaudeHome 'hooks/orq-metrics.ps1')
 Copy-OwnedFile (Join-Path $KitRoot 'statusline-wrapper.ps1') (Join-Path $ClaudeHome 'statusline-wrapper.ps1')
 
 Merge-Settings

@@ -151,7 +151,7 @@ Después, **dentro de Codex**, confiá el hook:
 
 ## 4. Puente híbrido
 
-Los tres archivos que hacen la integración:
+Los archivos que hacen la integración:
 
 ```powershell
 $dst = "$env:USERPROFILE\.claude"
@@ -162,11 +162,22 @@ Copy-Item ".\Orquestador\scripts\codex-run.ps1" "$dst\scripts\" -Force
 
 # el guard de git del lado Claude (mismo script que usa Codex)
 Copy-Item ".\Orquestador\hooks\git-guard.ps1"   "$dst\hooks\"   -Force
+
+# observabilidad del lado Claude: spawns, suites y fricción
+Copy-Item ".\Orquestador\hooks\orq-metrics.ps1" "$dst\hooks\"   -Force
+```
+
+La skill del orquestador se copia **entera con su carpeta**, no solo el
+`SKILL.md`: el core apunta a `references/` y sin esa carpeta quedan punteros a
+archivos que no existen.
+
+```powershell
+Copy-Item ".\Orquestador\skills\orquestador" "$dst\skills\" -Recurse -Force
 ```
 
 Y mergeá `Orquestador\settings-snippet.json` en `~/.claude/settings.json`.
-**Fusionar, no reemplazar**: `permissions.deny`, `permissions.allow` y
-`hooks.PreToolUse` se agregan a lo que ya tengas.
+**Fusionar, no reemplazar**: `permissions.deny`, `permissions.allow`,
+`hooks.PreToolUse` y `hooks.PostToolUse` se agregan a lo que ya tengas.
 
 Lo que aporta cada clave:
 
@@ -174,12 +185,18 @@ Lo que aporta cada clave:
 |---|---|
 | `permissions.deny` | Bloquea las formas directas de publicar cambios |
 | `hooks.PreToolUse` → `git-guard.ps1` | Cubre además `git -C` y `--git-dir=`, que la deny rule no alcanza |
+| `hooks.PreToolUse` → `orq-metrics.ps1` (matcher `Agent`) | Registra el arranque de cada subagente |
+| `hooks.PostToolUse` → `orq-metrics.ps1` (matcher `Agent\|Bash`) | Duración de cada spawn y resultado de cada corrida de tests |
 | `permissions.allow` → `codex-run.ps1` | Evita un prompt de permiso en cada delegación |
 | `attribution` + `includeCoAuthoredBy` | Commits sin atribución de IA |
 | `model: opus` + `effortLevel: medium` | El Orquestador corre en Opus |
 | `defaultMode: bypassPermissions` | Flujo sin prompts. Las deny rules siguen vigentes igual |
 
-Reiniciá Claude Code para que tome el hook nuevo.
+`orq-metrics.ps1` corre en `PostToolUse` sobre **cada** comando Bash. Está escrito
+para no poder interrumpir nada: ante cualquier error escribe nada, emite `{}` y
+sale con 0.
+
+Reiniciá Claude Code para que tome los hooks nuevos.
 
 ---
 
@@ -311,6 +328,64 @@ limpian a mano.
 
 **Actualizar los CLIs**: `codex update`. Hacelo *después* de que los smoke tests
 pasen, para no cambiar la base bajo los pies.
+
+### 7.0. Actualizar a la versión con delegación selectiva y métricas
+
+Es la actualización más reciente. Si venís de cualquier versión anterior, **corré
+el instalador y listo** — hace todo esto solo, respalda lo que pisa y no toca el
+lado Codex:
+
+```powershell
+git pull
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install-hibrido.ps1
+```
+
+Después **reiniciá Claude Code**: hay hooks nuevos y una carpeta de skill nueva,
+y ninguna de las dos cosas se toma en caliente de forma confiable.
+
+**Cómo saber en cuál estás:**
+
+```powershell
+Test-Path "$env:USERPROFILE\.claude\skills\orquestador\references\retro.md"
+```
+
+`False` → estás en una versión anterior.
+
+**Qué cambia:**
+
+| Componente | ¿Cambió? |
+|---|---|
+| `skills/orquestador/` | **Sí** — el `SKILL.md` es un core más chico y hay una carpeta `references/` nueva con cinco archivos |
+| `agents/tester.md`, `agents/constructor.md` | **Sí** — suman el contrato de frenar (`NEEDS_INFO`) y las reglas de test |
+| `agents/explorador.md` | **Sí** — reporta ambigüedades en vez de resolverlas |
+| `hooks/orq-metrics.ps1` | **Nuevo** |
+| `settings.json` | **Sí** — un `PreToolUse` y un `PostToolUse` nuevos para el hook de métricas |
+| `scripts/codex-run.ps1` | **No cambió** |
+| `hooks/git-guard.ps1` | **No cambió** |
+| Kit Codex (`~/.codex`) | **No cambió nada** |
+
+> [!IMPORTANT]
+> Si copiás a mano en vez de usar el instalador, copiá la **carpeta** de la skill,
+> no el `SKILL.md` suelto. El core apunta a `references/` y sin esa carpeta el
+> orquestador queda con punteros a archivos que no existen.
+
+**Verificación** — el instalador la corre solo al terminar, pero a mano es:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Orquestador\verify.ps1
+```
+
+Tiene que decir `reference retro.md presente` y `settings registra el hook de
+metricas en PostToolUse`. Si aparece "hay una versión más nueva en el repo",
+volvé a correr el instalador.
+
+**Primera señal de que las métricas andan**: después de una tarea con delegación,
+`.orquestador/decisions.jsonl` en el repo donde trabajaste tiene líneas con
+`"event"`. El informe de cierre:
+
+```powershell
+powershell -NoProfile -File "$env:USERPROFILE\.claude\hooks\orq-metrics.ps1" -Feedback
+```
 
 ### 7.1. Actualizar desde una versión anterior a las skills de documentación
 

@@ -7,7 +7,107 @@ correspondiente de [`docs/SYSTEM.md`](docs/SYSTEM.md) en el mismo diff.
 
 ## [Unreleased]
 
+### Added
+
+- **Observabilidad del lado Claude** (`Orquestador/hooks/orq-metrics.ps1`). Los
+  spawns de subagentes y las corridas de tests entran al mismo
+  `.orquestador/decisions.jsonl` que ya escribe el wrapper, distinguidos por el
+  campo `event` (`spawn_start`, `spawn_end`, `test_run`). El punto de
+  instrumentación es el par `PreToolUse`/`PostToolUse` sobre la herramienta
+  `Agent`: `SubagentStop` no sirve porque su payload no trae rol ni duración.
+  `-Report` agrega delegaciones por rol con duración, `NEEDS_INFO`, retries,
+  sesiones reusadas, findings, suites completas contra dirigidas y corridas en
+  RED. El hook nunca interrumpe trabajo — ante cualquier error escribe nada,
+  emite `{}` y sale con 0.
+- **Registro de fricción e informe de cierre.** `-Note <tipo> -Detail "..."
+  -Phase <fase>` anota, en el momento en que ocurre, lo que ningún hook puede
+  inferir: trabajo descartado (`rework`), defectos que encontró la revisión del
+  diff (`review-defect`), `NEEDS_INFO` predecibles, suites completas de más
+  (`wasted-verify`), rutas mal elegidas (`wrong-route`) y gotchas de entorno. Las
+  categorías son un set cerrado: una categoría libre por evento vuelve el log
+  inagrupable. `-Feedback` arma el informe de cierre con la forma de la sesión de
+  referencia —números, fricciones que los explican, tabla de delegaciones una por
+  una— y deja explícita una sección final con **lo que el log no sabe**, que
+  contesta el orquestador. Si no se anotó ninguna fricción, el informe lo dice en
+  vez de declarar que la sesión salió limpia.
+- **Payload del hook verificado contra un evento real**, no contra la
+  documentación: el campo es `tool_response` (la doc dice `tool_result`), y trae
+  `duration_ms` —duraciones exactas, sin emparejar—, `tool_use_id` y `prompt_id`.
+  De `tool_response.stdout`/`.stderr` sale el `result: RED/GREEN` de cada corrida,
+  descartando los `0 failed` que si no leerían como fallo. No hay exit code en el
+  payload; el emparejamiento FIFO queda como fallback cuando falta `duration_ms`.
+- **Cierre de fase con dos salidas a sesión limpia** (`references/retro.md`). Al
+  terminar una fase el orquestador ofrece, una sola vez y sin insistir,
+  **retroalimentación** (una sesión nueva arregla el código: defectos abiertos y
+  pendientes) o **feedback** (una sesión nueva evalúa la orquestación y recomienda
+  qué regla ajustar). El usuario elige una, las dos o ninguna; si la fase salió
+  limpia, ninguna es la respuesta correcta. Las gobierna un invariante: **el log
+  es evidencia, el resumen del orquestador es testimonio** — los dos handoffs
+  leen `decisions.jsonl` y `-Feedback` antes que la narrativa, y cuando discrepan
+  gana el log. El handoff de la ruta A lleva una sección de *decisiones que no hay
+  que revertir*, porque una sesión limpia no sabe qué era deliberado y "arregla"
+  simplificaciones con techo conocido. La ruta B compara contra los números de la
+  sesión de referencia y descarta toda recomendación sin un fallo observado
+  detrás; el resultado lo aplica el usuario, nunca el orquestador sobre sí mismo.
+- **Los tickets que llegan a mitad de una unidad se encolan, no interrumpen.**
+  Pasan por el gate cuando la unidad en curso cierra. Absorberlos re-scopea una
+  fase que ya tenía criterio de aceptación. La excepción es un ticket que
+  invalide lo que está en curso: ahí se para y se replantea.
+- **Repository Context Capsule** (`references/capsule.md`): formato de
+  `.orquestador/repo.md` con intérprete, comandos, baseline y gotchas del repo,
+  para pegar textual en las specs en vez de que cada subagente redescubra el
+  entorno. Sin maquinaria de invalidación, a propósito.
+
 ### Changed
+
+- **Delegación selectiva** (`D-018`). La primera decisión ante cada tarea pasa a
+  ser `DIRECT` / `DELEGATE` / `PARALLELIZE`, con `DIRECT` como default: delegar es
+  la excepción que hay que justificar. El umbral de "~50 líneas" se reemplaza por
+  "más de tres archivos, o código que no tengo en contexto" — el tamaño del diff
+  no mide el costo del ciclo. El TDD pasa a ser por riesgo en tres rutas
+  (`BR-015`): presentacional y mecánico sin test nuevo, comportamiento acotado con
+  un RED escrito por el orquestador, y pipeline completo con tester independiente
+  solo para regla de negocio, cálculo, persistencia, validación, permisos, estados
+  y contratos. La verify ladder pasa a ser **por alcance** antes que por tipo
+  (test afectado → módulo → repo), con suite completa solo en cierre de fase,
+  cambio transversal o entrega. El writer lock pasa a ser **por repositorio**, no
+  por sesión: dos repos distintos ya no se serializan. La revisión del diff por el
+  Tech Lead **no se toca**: es lo que encontró los cinco defectos que motivaron
+  todo esto, y ninguno lo atrapó un test.
+- **Los subagentes Claude frenan antes de escribir** (`BR-014`, `D-019`).
+  `tester` y `constructor` devuelven `NEEDS_INFO` —con `missing_fact`,
+  `evidence_checked`, `question` y `affected_decision`— ante una ambigüedad que
+  cambie el diseño, sin tocar un archivo, y agrupando todas las dudas en una sola
+  devolución. El orquestador resuelve desde evidencia del repo y continúa por
+  `SendMessage` sobre el **mismo** subagente, que conserva su contexto: no se
+  reconstruye la spec ni se spawnea uno nuevo. Mismo tope que Codex (`BR-013`): 2
+  ciclos, sin consumir presupuesto de retry. `explorador` reporta las dos
+  interpretaciones con su evidencia en vez de elegir una.
+- **El tester prueba el camino real** (`BR-015`). Al menos un test por cambio de
+  comportamiento ejercita el componente o el endpoint **como lo invoca la
+  aplicación**; un test que construye a mano una entrada que la aplicación nunca
+  genera no cuenta como cobertura y hay que decirlo. Toda aserción de ausencia
+  lleva un contraejemplo que verifica la presencia cuando corresponde. Además,
+  reusar antes que crear: si la regla de negocio cambió y ya hay un test que la
+  cubre, se ajusta ese test en vez de escribir uno nuevo al lado.
+- **La skill del orquestador se parte en dos niveles.** `SKILL.md` queda con la
+  política que se usa en toda tarea (~15 KB, contra ~31 KB), y el detalle pasa a
+  `skills/orquestador/references/`: `routing.md` (casos A–H, estados de cuota,
+  fallbacks), `codex.md` (delegación, plantilla de spec, `NEEDS_INFO`, reuso de
+  sesión), `docs-matrix.md` (impacto documental y Definition of Done) y
+  `capsule.md`. Se leen solo cuando la ruta los pide. El gate de presupuesto pasa
+  a consultarse una vez por sesión, no por tarea.
+- **Specs de Codex con `REAL APPLICATION BEHAVIOR`.** La plantilla canónica suma
+  un bloque con cómo se invoca el cambio, quién produce el input, cuál es la
+  fuente de verdad, qué estado se persiste y qué ve el usuario. Corrige la falla
+  característica de Codex, que optimiza para hacer pasar el test porque ese es el
+  criterio que se le da.
+- **Baseline medida, nunca citada.** El estado de la suite se mide en la sesión
+  antes de la primera delegación relevante. Un handoff, un README, un CHANGELOG o
+  una memoria describen otro momento.
+- `install.ps1` reescribe el runner en todos los hooks del snippet en vez de en
+  uno fijo, y deduplica por evento al reinstalar. `verify.ps1` chequea los cuatro
+  `references/` y el registro del hook de métricas en sus dos eventos.
 
 - **Contrato de delegación a Codex endurecido.** El schema `impl` suma `status`
   (`DONE` | `NEEDS_INFO` | `BLOCKED`) y `clarifications[]` (`missing_fact`,

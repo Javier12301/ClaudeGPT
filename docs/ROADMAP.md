@@ -79,6 +79,63 @@ Estado: IN_PROGRESS. Ver
 - Los respaldos del instalador se acumulan sin límite, un directorio por corrida en
   `~/.claude/orquestador-backups/`. Nada los borra.
 
+## Fase 2.6 — Delegación selectiva y observabilidad del lado Claude
+
+Estado: IN_PROGRESS. Nace del uso real documentado en
+`MEJORAR ORQUESTADOR/FEEDBACK-ORQUESTADOR.md`. Ver
+[D-018](DECISIONS.md#d-018--delegar-por-costo-del-ciclo-no-por-tamaño-del-diff) y
+[D-019](DECISIONS.md#d-019--el-contrato-de-frenar-es-replicable-no-del-proveedor).
+
+- [x] Gate `DIRECT` / `DELEGATE` / `PARALLELIZE`, con `DIRECT` como default y el
+      umbral de líneas reemplazado por "más de tres archivos o contexto que no
+      tengo"
+- [x] TDD por riesgo en tres rutas (`BR-015`): presentacional sin test nuevo,
+      comportamiento acotado con RED del orquestador, pipeline completo para
+      regla de negocio
+- [x] `NEEDS_INFO` para `tester` y `constructor` (`BR-014`), con continuación por
+      `SendMessage` sobre el mismo subagente
+- [x] Regla del camino real y del contraejemplo en `tester`
+- [x] Reusar antes que crear, también en tests: ajustar el test existente cuando
+      cambia la regla, en vez de escribir uno nuevo al lado
+- [x] Baseline de la suite medida en la sesión, nunca citada de un handoff
+- [x] Verify ladder por alcance (test afectado → módulo → repo)
+- [x] Barrido de tests heredados antes de delegar un cambio observable
+- [x] Writer lock por repositorio en vez de por sesión
+- [x] Fixes del reviewer aplicados por el orquestador o por la sesión original
+- [x] `REAL APPLICATION BEHAVIOR` en la plantilla de spec de Codex
+- [x] Skill partida en core + `references/` (~31 KB → ~15 KB de preámbulo)
+- [x] Hook `orq-metrics.ps1`: spawns de subagentes Claude y suites full vs
+      dirigidas en `decisions.jsonl`
+- [x] Duraciones exactas desde `duration_ms` del payload, y `result: RED/GREEN`
+      de cada corrida desde `tool_response.stdout`/`.stderr`
+- [x] Fricción declarada (`-Note`) con categorías cerradas, e informe de cierre
+      (`-Feedback`) con la forma de la sesión de referencia
+- [ ] **Repository Context Capsule en uso real.** El formato está definido en
+      `skills/orquestador/references/capsule.md`; falta escribir la primera
+      `.orquestador/repo.md` en un repo de trabajo y medir si evita de verdad que
+      los subagentes redescubran el entorno.
+- [ ] **Medir la próxima sesión real contra la documentada.** `orq-metrics.ps1
+      -Report` contra los números de referencia: 11 delegaciones, 3 `NEEDS_INFO`,
+      12 suites completas, 5 fixes post-delegación. El criterio de éxito no es
+      menos agentes: es que los cinco defectos se sigan encontrando con menos
+      viajes.
+
+### Deuda conocida
+
+- `BR-014` y `BR-015` son criterio de prompt, no verificables contra código: no
+  tienen test. Su evidencia va a ser la comparación de la próxima sesión.
+- El `result: RED/GREEN` sale de firmas de texto en la salida del runner, porque
+  el payload no trae exit code. Está probado contra los formatos de pytest, jest
+  y vitest; un runner con otro formato de resumen puede dar un falso GREEN. Es
+  una métrica perdida, nunca un fallo.
+- El emparejamiento FIFO quedó como fallback: `duration_ms` viene en el payload y
+  las duraciones son exactas. Falta confirmar en una sesión real que el evento de
+  `Agent` también lo trae — se verificó sobre `Bash`, y por eso el fallback sigue
+  ahí en vez de borrarse.
+- La calidad del `-Feedback` depende de que las fricciones se anoten en el
+  momento. Si no se anotan, el informe lo dice en vez de declarar que la sesión
+  salió limpia.
+
 ## Fase 3 — Observabilidad de Codex e instalador
 
 Estado: TODO. Investigado el 2026-08-21 contra `codex-cli 0.149.0`.

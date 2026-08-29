@@ -265,6 +265,43 @@ Test: —
 Código: `Orquestador/skills/orquestador/SKILL.md`; `Orquestador/scripts/codex-run.ps1`
 — `-ClarifyOf`, `clarify_of` en `decisions.jsonl`
 
+#### BR-014 — Los subagentes Claude frenan antes de escribir
+
+`tester` y `constructor` tienen el mismo contrato de frenar que Codex: ante una
+ambigüedad que **cambie el diseño** —de dónde sale un dato, qué se persiste, qué
+contrato se toca, qué pasa en el camino de error, qué capa es responsable, una
+regla de dominio— devuelven `NEEDS_INFO` con `missing_fact`, `evidence_checked`,
+`question` y `affected_decision`, **sin escribir un solo archivo**, y agrupando
+todas las dudas en una sola devolución. Antes de frenar tienen que intentar
+verificar el hecho contra el repo. Las decisiones mecánicas —nombres internos,
+helpers, organización local— las toman solas y no se preguntan.
+
+El orquestador resuelve el hecho desde evidencia y responde con `SendMessage` al
+**mismo** subagente, solo con el delta: el contexto del subagente se conserva y
+no se reconstruye la spec. Aplica el mismo tope de BR-013: 2 ciclos por tarea, y
+no consume presupuesto de retry.
+
+`explorador` no frena —es de solo lectura— pero reporta las dos interpretaciones
+con su evidencia en vez de elegir una.
+
+Estado: Activa
+Test: —
+Código: `Orquestador/agents/tester.md`; `Orquestador/agents/constructor.md`;
+`Orquestador/agents/explorador.md`; `Orquestador/skills/orquestador/SKILL.md` — Fase 5
+
+#### BR-015 — El test tiene que recorrer el camino real
+
+Al menos un test por cambio de comportamiento ejercita el componente, endpoint o
+servicio **como lo invoca la aplicación**. Un test que construye a mano una
+entrada que la aplicación nunca genera no cuenta como cobertura de ese camino, y
+el `tester` tiene que decirlo. Toda aserción de que algo **no** aparece lleva un
+contraejemplo que verifica que **sí** aparece cuando corresponde — sin él, el
+test también pasa cuando la regla entera dejó de evaluarse.
+
+Estado: Activa
+Test: —
+Código: `Orquestador/agents/tester.md`; `Orquestador/skills/orquestador/SKILL.md` — Fase 4
+
 ### Señal de vida durante la delegación
 
 El punto 2 de arriba —`--json` va a un stream aparte, nunca al contexto de
@@ -366,11 +403,28 @@ que un `DONE`.
 
 Reglas de criterio, no verificables contra código — sin ID:
 
-- Un fix directo aplicado por el orquestador se limita a menos de ~50 líneas;
-  por encima de eso se delega.
-- Un solo escritor a la vez sobre el working tree: nunca el constructor de
-  Claude y un executor de Codex en paralelo. Los reviewers read-only sí van
-  en paralelo.
+- La primera decisión ante cada tarea es `DIRECT` / `DELEGATE` / `PARALLELIZE`,
+  y `DIRECT` es el default: delegar es la excepción que hay que justificar.
+- La implementación se delega cuando el cambio toca **más de tres archivos** o
+  necesita código que el orquestador no tiene en contexto. El tamaño del diff no
+  es criterio; el costo del ciclo completo sí.
+- Los tests nuevos se crean por riesgo, no por ritual: presentacional y mecánico
+  no lleva test nuevo, comportamiento acotado lleva un RED escrito por el
+  orquestador, y el pipeline con tester independiente queda para regla de
+  negocio, cálculo, persistencia, validación, permisos, estados y contratos.
+- Reusar antes que crear, también en tests: si ya existe un test que cubre el
+  comportamiento y la regla cambió, se ajusta ese test en vez de escribir uno
+  nuevo al lado.
+- La verificación es por alcance antes que por tipo: test afectado → módulo →
+  repo, y suite completa solo en cierre de fase, cambio transversal o entrega.
+- La baseline de la suite se mide en la sesión, nunca se cita de un handoff, un
+  README, un CHANGELOG ni una memoria.
+- Los fixes sobre trabajo delegado los aplica el orquestador. Si hace falta más
+  contexto, se continúa el subagente original con `SendMessage` o la sesión de
+  Codex con `-Resume`; un executor nuevo y frío es la última opción.
+- Un solo escritor a la vez **por repositorio** —no por sesión—: nunca el
+  constructor de Claude y un executor de Codex sobre el mismo repo. Repos
+  distintos no se bloquean entre sí. Los reviewers read-only sí van en paralelo.
 - El reviewer nunca hereda la sesión del constructor.
 - El wrapper no pasa nunca flags de bypass (`--dangerously-bypass-*`,
   `--ignore-rules`).
@@ -444,13 +498,41 @@ flowchart TD
 
 | Agente | Modelo | Qué hace |
 |---|---|---|
-| `/orquestador` (skill) | Opus | Habla con vos, decide, delega, arbitra, aplica fixes < ~50 líneas |
+| `/orquestador` (skill) | Opus | Habla con vos, decide, delega, arbitra, implementa lo que ya entiende y aplica los fixes sobre trabajo delegado |
 | `explorador` | Sonnet | Solo lectura. Entiende un flujo completo y devuelve contrato, riesgos y `archivo:línea` |
 | `tester` | Sonnet | Escribe tests RED desde la spec. Solo toca archivos de test |
 | `constructor` | Sonnet | Spec + RED → GREEN. No escribe sus propios tests |
 
 Los tres subagentes tienen `Agent`/`Task` bloqueados: **solo el Orquestador
 delega**. `tester` y `constructor` precargan la disciplina `ponytail`.
+
+La skill del orquestador se carga en dos niveles: `SKILL.md` trae la política que
+se usa en toda tarea, y `skills/orquestador/references/` (`routing.md`,
+`codex.md`, `docs-matrix.md`, `capsule.md`, `retro.md`) trae el detalle que se lee
+solo cuando la ruta lo pide. El preámbulo permanente pasó de ~31 KB a ~18 KB.
+
+### Cierre de fase — las dos salidas a sesión limpia
+
+Al cerrar una fase el orquestador ofrece dos handoffs, y el usuario elige uno,
+los dos o ninguno. Las dos arrancan en sesión nueva porque una sesión larga
+acumula contexto degradado y seguir arreglando ahí produce más errores.
+
+| | Qué arregla | Quién la corre |
+|---|---|---|
+| **A — Retroalimentación** | El código: defectos abiertos, pendientes, deuda de la fase | Sesión Claude nueva |
+| **B — Feedback** | El orquestador: qué regla falló y qué ajustar | Sesión nueva o `-Role reviewer` |
+
+Las gobierna un invariante: **el log es evidencia, el resumen del orquestador es
+testimonio.** Los dos handoffs leen `decisions.jsonl` y `-Feedback` primero y la
+narrativa al final; cuando discrepan, gana el log. Es la misma regla que "baseline
+medida, nunca citada", aplicada a la retro de sí misma — un resumen lo escribe la
+parte evaluada, al final y de memoria.
+
+La ruta B filtra sus recomendaciones por un criterio único: **una regla nueva
+existe porque corrige un fallo observado en el log de esa fase**, no porque suena
+bien. Una recomendación sin evento detrás se descarta. El resultado se le entrega
+al usuario y lo aplica él: el orquestador no se auto-modifica desde su propia
+retro. Procedimiento completo en `references/retro.md`.
 
 **`explorador` no es el default para localizar código.** La exploración sube una
 escalera de costo y para en el primer escalón que alcanza: `git ls-files` para la
@@ -733,7 +815,9 @@ No se guarda: typos, cambios mecánicos, logs, resultados triviales.
 ### Observabilidad
 
 Un archivo, sin dashboard ni telemetría: `.orquestador/decisions.jsonl` en el repo
-de trabajo, una línea por delegación.
+de trabajo. Escriben dos productores en el mismo formato: `codex-run.ps1` pone una
+línea por delegación a Codex, y el hook `orq-metrics.ps1` pone una línea por spawn
+de subagente Claude y por corrida de tests.
 
 ```json
 {"ts":"2026-08-20T22:26:35","task":"slugify","role":"constructor","tier":"worker",
@@ -752,13 +836,72 @@ reusó sesión y cuánto había crecido, y cómo terminó.
 sale del wrapper. `retry_of` registra **solo reintentos por RED lógico**
 (BR-008): una falla de sandbox o de red no es un retry.
 
-No hay script agregador. La pregunta que estos campos existen para responder es
-una sola —**cuántas veces se llegó a `SURVIVAL` con Codex sano**— y se contesta
-desde la terminal:
+Las entradas del hook llevan `event` —las del wrapper no— y es lo que las separa
+al agregar:
+
+```json
+{"ts":"2026-08-28T10:03:00","event":"spawn_end","agent":"tester","task":"RED de impuestos","duration_s":660,"tool_use_id":"toolu_..."}
+{"ts":"2026-08-28T10:05:00","event":"test_run","scope":"full","result":"RED","command":"npm test","duration_s":95}
+{"ts":"2026-08-28T10:20:00","event":"friction","kind":"rework","phase":"test","detail":"el tester eligio la fuente sin preguntar"}
+```
+
+El punto de instrumentación es el par `PreToolUse`/`PostToolUse` sobre la
+herramienta `Agent`. **`SubagentStop` no sirve**: su payload trae `session_id`,
+`transcript_path`, `cwd` y `reason`, sin rol ni duración.
+
+#### Lo que el payload trae de verdad
+
+Verificado contra un evento real de `PostToolUse`/`Bash`, no contra la
+documentación —que nombra el campo `tool_result` cuando en realidad es
+`tool_response`—:
+
+| Campo | Para qué se usa |
+|---|---|
+| `duration_ms` | Duración exacta. Cuando está, no hace falta emparejar nada |
+| `tool_use_id` | Id único de invocación: emparejamiento exacto si hiciera falta |
+| `prompt_id` | Agrupa las herramientas de un mismo turno del usuario |
+| `tool_response.stdout` / `.stderr` | De ahí sale `result: RED/GREEN` de cada corrida |
+
+**No hay exit code** en el payload, así que el resultado de una corrida se decide
+por las firmas de fallo en la salida del runner, descartando primero los
+`0 failed` que si no leerían como RED. Un falso negativo pierde una métrica y no
+rompe nada. `Get-Durations` prefiere `duration_s` y solo cae a emparejar FIFO
+cuando falta.
+
+#### Los dos modos de lectura
 
 ```powershell
-Get-Content .orquestador\decisions.jsonl | ConvertFrom-Json | Group-Object state
+powershell -File ~/.claude/hooks/orq-metrics.ps1 -Report     # los numeros
+powershell -File ~/.claude/hooks/orq-metrics.ps1 -Feedback   # el informe de cierre
 ```
+
+`-Report` da delegaciones por rol con duración, `NEEDS_INFO`, retries, sesiones
+reusadas, findings, suites completas contra dirigidas y corridas en RED.
+
+`-Feedback` arma el informe de cierre con la forma de la sesión de referencia:
+los números, las fricciones que las explican, la tabla de delegaciones una por
+una, y una última sección con **lo que el log no sabe**. Esa sección no se
+rellena sola a propósito: qué delegación valió lo que costó, de qué familia eran
+los defectos y qué regla los habría evitado lo contesta el orquestador. Un
+informe que se inventa esa parte no sirve para cambiar una regla.
+
+#### Fricción declarada
+
+Lo cualitativo no es observable, así que se declara en el momento en que ocurre
+—nunca en una retro al final, donde ya se olvidó el detalle:
+
+```powershell
+powershell -File ~/.claude/hooks/orq-metrics.ps1 -Note rework -Detail "..." -Phase test
+```
+
+Categorías cerradas por `ValidateSet`: `rework`, `review-defect`,
+`predictable-needs-info`, `wasted-verify`, `wrong-route`, `env-gotcha`. Es un set
+cerrado a propósito — una categoría libre por evento vuelve el log inagrupable, y
+agrupar es todo lo que se le pide.
+
+Solo se anota fricción, nunca lo que salió bien: el log existe para encontrar qué
+cambiar. **Los tokens de subagentes Claude siguen fuera** y no se fingen: los
+hooks no los ven.
 
 ---
 

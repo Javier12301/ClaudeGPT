@@ -56,6 +56,14 @@ T ($guards.Count -eq 1) 'no duplica el hook git-guard preexistente'
 $mine = @($d.hooks.PreToolUse | Where-Object { (@($_.hooks | ForEach-Object { [string]$_.command }) -join ' ') -match 'mi-hook-propio' })
 T ($mine.Count -eq 1) 'preserva un hook propio del usuario'
 
+# El hook de metricas vive en dos eventos: PreToolUse sobre Agent y PostToolUse
+# sobre Agent|Bash. El merge tiene que instalar los dos, no solo el primero.
+$mPre  = @($d.hooks.PreToolUse  | Where-Object { (@($_.hooks | ForEach-Object { [string]$_.command }) -join ' ') -match 'orq-metrics' })
+$mPost = @($d.hooks.PostToolUse | Where-Object { (@($_.hooks | ForEach-Object { [string]$_.command }) -join ' ') -match 'orq-metrics' })
+T ($mPre.Count -eq 1)  'instala orq-metrics en PreToolUse'
+T ($mPost.Count -eq 1) 'instala orq-metrics en PostToolUse'
+T ($mPost[0].matcher -match 'Bash') 'el PostToolUse de metricas matchea Bash'
+
 T ($d.model -eq 'sonnet')      'NO pisa el model que ya eligio el usuario'
 T ($d.effortLevel -eq 'medium') 'siembra effortLevel cuando falta'
 
@@ -67,6 +75,8 @@ T ($d.enabledPlugins.'engram@engram' -eq $true) 'agrega los plugins del kit'
 $d2 = Get-Content (Join-Path $tmp 'settings.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $g2 = @($d2.hooks.PreToolUse | Where-Object { (@($_.hooks | ForEach-Object { [string]$_.command }) -join ' ') -match 'git-guard' })
 T ($g2.Count -eq 1) 'reinstalar no duplica el hook'
+$m2 = @($d2.hooks.PostToolUse | Where-Object { (@($_.hooks | ForEach-Object { [string]$_.command }) -join ' ') -match 'orq-metrics' })
+T ($m2.Count -eq 1) 'reinstalar no duplica el hook de metricas'
 T (@($d2.permissions.deny).Count -eq @($d.permissions.deny).Count) 'reinstalar no duplica los deny'
 T ((Get-ChildItem (Join-Path $tmp 'orquestador-backups') -Directory).Count -eq 2) 'cada corrida deja su respaldo'
 
@@ -89,6 +99,55 @@ $verifyText = & {
 T ($verifyText -notmatch 'no se reconoce|is not recognized|CommandNotFoundException') `
   'verify.ps1 corre entero sin cmdlets faltantes'
 T ($verifyText -match 'al dia respecto del repo') 'verify.ps1 evalua la deteccion de deriva'
+
+# --- maquina virgen -----------------------------------------------------------
+#
+# Es el camino real de instalar en otra computadora, y NO es el mismo que
+# reinstalar encima: no hay settings.json que fusionar, no hay directorios
+# creados, y un archivo nuevo del kit que el instalador no copie no lo detecta
+# ningun test de merge.
+$virgin = Join-Path $env:TEMP ("claude-virgin-" + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force $virgin | Out-Null
+$env:CLAUDE_HOME = $virgin
+try {
+    & $Installer -SkipStatusLine 2>&1 | Out-Null
+
+    foreach ($rel in @(
+        'skills/orquestador/SKILL.md',
+        'skills/orquestador/references/routing.md',
+        'skills/orquestador/references/codex.md',
+        'skills/orquestador/references/docs-matrix.md',
+        'skills/orquestador/references/capsule.md',
+        'skills/orquestador/references/retro.md',
+        'skills/brainstorming/SKILL.md',
+        'skills/documentacion/SKILL.md',
+        'agents/explorador.md', 'agents/tester.md', 'agents/constructor.md',
+        'hooks/git-guard.ps1', 'hooks/orq-metrics.ps1',
+        'scripts/codex-run.ps1', 'statusline-wrapper.ps1', 'settings.json'
+    )) {
+        T (Test-Path (Join-Path $virgin $rel)) "virgen: instala $rel"
+    }
+
+    # Todo reference del repo tiene que llegar, no solo los que estan listados
+    # arriba: si se agrega uno nuevo y el instalador no lo copia, esto lo caza.
+    $repoRefs = @(Get-ChildItem (Join-Path $PSScriptRoot '../skills/orquestador/references') -Filter '*.md')
+    $instRefs = @(Get-ChildItem (Join-Path $virgin 'skills/orquestador/references') -Filter '*.md' -ErrorAction SilentlyContinue)
+    T ($repoRefs.Count -gt 0 -and $repoRefs.Count -eq $instRefs.Count) `
+      "virgen: llegan los $($repoRefs.Count) references del repo"
+
+    $vd = Get-Content (Join-Path $virgin 'settings.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    T ($vd.permissions.deny -contains 'Bash(git push:*)') 'virgen: siembra el deny de git push'
+    T ($vd.permissions.defaultMode -eq 'bypassPermissions') 'virgen: siembra defaultMode'
+    T ($vd.model -eq 'opus') 'virgen: siembra el model del kit cuando no hay uno elegido'
+    $vPost = @($vd.hooks.PostToolUse | Where-Object {
+        (@($_.hooks | ForEach-Object { [string]$_.command }) -join ' ') -match 'orq-metrics'
+    })
+    T ($vPost.Count -eq 1) 'virgen: registra el hook de metricas en PostToolUse'
+}
+finally {
+    $env:CLAUDE_HOME = $tmp
+    if (Test-Path $virgin) { Remove-Item -Recurse -Force $virgin }
+}
 }
 finally {
     $env:CLAUDE_HOME = $previousClaudeHome

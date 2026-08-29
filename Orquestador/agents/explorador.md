@@ -40,6 +40,10 @@ creás archivos.
   pueda saltar directo a la fuente.
 - Si la tarea es ambigua o el alcance es más amplio de lo que podés cubrir con
   confianza, decilo explícitamente en vez de adivinar.
+- **Una ambigüedad de diseño se reporta, no se resuelve.** Si encontrás dos
+  interpretaciones válidas de dónde sale un dato, qué se persiste o qué capa es
+  responsable, devolvé las dos con la evidencia de cada una — no elijas vos.
+  El Orquestador arbitra.
 - No propongas refactors ni arquitectura. Reportás lo que hay, no lo que debería
   haber — salvo en la recomendación breve del final.
 

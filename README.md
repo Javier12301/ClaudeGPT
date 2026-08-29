@@ -52,6 +52,19 @@ barra de estado muestra `CX> <rol> <tiempo> <último evento>` y desaparece al
 terminar; para mirar de cerca, `Get-Content -Wait "$env:TEMP\claude\codex-live.log"`
 sigue el stream en vivo.
 
+**Qué costó cada sesión.** Los spawns, sus duraciones, las suites completas
+contra las dirigidas y las corridas en RED quedan en `.orquestador/decisions.jsonl`
+del repo donde trabajás, junto a las delegaciones a Codex. Al cerrar una fase:
+
+```powershell
+powershell -NoProfile -File "$env:USERPROFILE\.claude\hooks\orq-metrics.ps1" -Feedback
+```
+
+Devuelve el informe de cierre — los números, la fricción que los explica y las
+delegaciones una por una — y deja explícito lo que el log no puede saber, que lo
+contesta el orquestador. Es lo que permite después ajustar una regla con evidencia
+en vez de con impresión.
+
 Para saber si tu instalación quedó atrás del repo,
 [`Orquestador/verify.ps1`](Orquestador/verify.ps1) compara por hash y nombra el
 archivo desactualizado. Detalle y versión manual:
