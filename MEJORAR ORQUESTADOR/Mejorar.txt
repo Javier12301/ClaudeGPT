@@ -1,0 +1,114 @@
+Retro · sesión openGYM · 8 fases
+El orquestador no mide
+Las reglas funcionaron. La capa que debía probarlo es la única parte que no funciona — y eso es también lo que mantiene a Codex fuera de juego.
+
+Codex: útil, condicionado
+¿Mezclar Codex sirve o complica?
+Sirve, pero hoy no está sirviendo. Esta sesión usé Codex cero veces, y la máquina que lo soporta es 381 de 682 líneas de referencias (56%) más un script de 43 KB. Todo eso fue peso muerto.
+
+La causa no es que la idea esté mal: el modelo de veredicto + estado es sólido, y CODEX-PREFERRED a partir del 50% de la ventana es un buen hábito. La causa es que el gate de Fase 0.5 es opcional y silencioso. Lo salté y nada lo notó. Una regla de routing que solo se activa si te acordás de activarla, bajo carga tiende a "nunca".
+
+Y hay un techo que conviene saber antes de invertir ahí: Codex no baja el costo de revisar. Encontré 3 defectos en el Java que escribió el constructor de Claude; los mismos 3 habría que buscarlos en el de Codex. El ahorro es en generación, no en revisión — y la revisión es donde el orquestador aporta. Por eso SONNET-LEAD (bajar de modelo al que orquesta) es palanca más grande que elegir quién escribe el código.
+
+P0 · El log dice cosas que no pasaron
+Antes que cualquier regla. El cierre de fase produce un informe con aire de evidencia que en realidad mezcla mi testimonio con datos de otra sesión.
+
+.orquestador/decisions.jsonl tiene 11 líneas para 8 fases, 5 delegaciones y ~15 corridas de tests. Esto es lo que el informe afirma contra lo que pasó:
+
+Informe generado vs. sesión real
+El informe dice	Lo que pasó	Causa
+2 delegaciones a Codex	0	Filas del 26-ago de otra sesión, sin filtrar por sesión actual
+3 delegaciones a Claude	5	tester y constructor nunca se registran
+Explore: 0 s cada uno	88 / 152 / 237 s	Cada agente se loguea 2× con timestamp idéntico
+Suites: 0 completas, 0 dirigidas	~15 corridas	npm test no se captura
+Corridas en RED: 0 de 0	1 ciclo de 7 tests	RED→GREEN no se captura
+Lo único con contenido real en ese informe son las 3 notas que escribí a mano con -Note. Eso es peor que no tener informe: un informe vacío se ignora, uno confiado y equivocado se cree.
+
+Mientras no se arregle, que el cierre diga la verdad en vez de inventar cero:
+
+Si no hay eventos capturados de ESTA sesión:
+  "El log no registró esta sesión — los números de abajo son
+   solo las notas manuales. No los uses para comparar."
+Tres arreglos en el hook, por orden: filtrar por sesión, aparear spawn/complete en vez de duplicar, y capturar las corridas de suite.
+
+Cambios al SKILL.md
+Ordenados por lo que más costó esta sesión. Los tres primeros son texto que se reemplaza; el último es texto que se borra.
+
+P1
+ROUTING
+El gate de presupuesto tiene que dejar de depender de mi memoria
+Fase 0.5 dice «una vez por sesión». No la corrí, nadie se enteró, y con eso se desactivaron las rutas A–H, los estados y todo references/routing.md. Ya tenés hooks SessionStart para ponytail y engram — este es el mismo caso.
+
+Movelo del texto al arranque: que -BudgetOnly corra en SessionStart e inyecte el estado como contexto. Así el orquestador nunca decide si consultarlo, solo qué hacer con la respuesta. Es el cambio que hace que Codex exista de verdad.
+
+P2
+CONCURRENCIA
+Un escritor por región, no por repositorio
+La regla actual me hizo serializar el plugin de Android detrás del trabajo en el frontend, con conjuntos de archivos completamente disjuntos (frontend/android/** vs frontend/src/**). Y la propia skill ya razona en Fase 2 en términos de «región de archivos con dueño independiente» — se contradice.
+
+## Un solo escritor por región de archivos
+
+Dos unidades que no comparten ningún archivo pueden escribir en
+paralelo, estén o no en el mismo repo. Lo que no se puede es que
+dos agentes toquen el mismo archivo.
+
+Antes de lanzar en paralelo, listá los archivos de cada unidad.
+Si las listas se cruzan, no son dos unidades.
+P3
+VERIFICACIÓN
+Falta el paso de ejercitar la app real
+Los 3 defectos de la sesión salieron de manejar la aplicación, ninguno de un test. Los 213 estaban en verde mientras yo tenía metida una regresión de UX: al quitar un sheet borré sin querer el botón que avanzaba al ejercicio siguiente. Ningún test podía verla, y la revisión del diff tampoco — el diff se veía correcto.
+
+## Fase 5.5 — ejercitar la app real
+
+Obligatoria si el cambio toca algo que el usuario ve. Antes de la
+revisión del diff, no después.
+
+Levantá la app y recorré el flujo COMPLETO que tocaste, no la
+pantalla que cambiaste. Un diff correcto puede haber quitado un
+paso que nadie declaró en ningún lado.
+
+Lo que salga de acá se anota como `review-defect` y se arregla
+antes de cerrar la fase.
+Va después de implementar y antes de Fase 6, no como parte de la revisión: son dos cosas distintas y encuentran defectos distintos.
+
+P4
+VOLUMEN
+Recortar lo que nunca se usó
+1.077 líneas entre SKILL.md y referencias. Lo que usé de verdad en 8 fases:
+
+DIRECT por defecto — acerté las 8 veces, sin dudar ninguna
+Exploración en paralelo por regiones disjuntas
+Baseline medido antes de tocar nada
+Contract gate
+Independencia del tester
+El reviewer no implementa · los fixes los aplica el orquestador
+El resto no lo toqué. En particular, la cantidad de texto dedicada al gate DIRECT/DELEGATE no se corresponde con lo difícil que resultó: fue obvio siempre. Y references/docs-matrix.md tampoco entró, porque la mayoría de las tareas no toca documentación — cosa que la propia skill dice.
+
+No borres el routing todavía. Primero automatizá el gate (P1) y medí una sesión con Codex de verdad. Si con el gate automático sigue sin usarse, ahí sí: bajá routing.md a la tabla de estados y borrá el resto.
+
+Qué no tocar
+Cuatro reglas que hicieron exactamente lo que prometen. Vale nombrarlas para que un recorte no se las lleve por delante.
+
+Exploración en paralelo
+Tres exploradores sobre regiones disjuntas devolvieron causas raíz mejores que las que yo habría encontrado primero, incluido el análisis de flexbox que explicaba el bug visual.
+
+Baseline medido
+200/0 al arrancar. Sin ese número, los 213 tests del final no habrían significado nada: no habría sabido si 7 eran nuevos o algo se había roto.
+
+Contract gate
+Congelar el contrato y pasarle el mismo texto al tester dio 7 RED al primer intento: 0 NEEDS_INFO, 0 retries. La regla cumplió al pie de la letra.
+
+Independencia del tester
+Escribió un caso que yo no había especificado y que cubría un hueco real de mi diseño. Es el argumento entero de la regla, cumplido literalmente.
+
+Sobre reducir consumo
+Una observación que el routing no cubre y que pesó más que la elección de ejecutor.
+
+El gasto más grande de esta sesión no fue delegar: fue manejar el navegador. Decenas de idas y vueltas de screenshot y JS, con clicks que caían mal porque las coordenadas de la captura no coincidían con el DOM, un file_upload que reportó éxito sobre un elemento ya desmontado, y timeouts de CDP de 30 y 45 segundos.
+
+Ninguna regla de routing toca eso. Cambiar de herramienta de navegador ahorra más que mover ejecutores entre modelos, y ya está hecho. Vale la pena tenerlo presente al decidir dónde invertir: el cuello de botella real se encuentra midiendo, no razonando — que es justo lo que el P0 impide hoy.
+
+Dicho eso, 3 de mis 5 delegaciones eran candidatas claras a Codex: contrato congelado, verificables por build o por medición, y código que yo no tenía en contexto. El plugin de Java es el ejemplo de manual. Con el gate automático, esas tres salen de tu cuota de Claude sin discusión.
+
+Resumen. El orquestador dio estructura donde importaba y solo estorbó en la regla del escritor único. El agujero no está en las reglas: está en que la parte diseñada para mejorarse a sí misma es la única que no funciona. Arreglá la medición primero — todo lo demás, incluida la decisión sobre Codex, se contesta solo cuando haya datos reales de dos o tres sesiones.
