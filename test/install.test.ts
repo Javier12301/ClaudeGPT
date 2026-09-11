@@ -35,12 +35,15 @@ test('init es idempotente: la segunda corrida no cambia ni un byte ni crea backu
   const b = orq(sb, ['init', '--offline'])
   assert.equal(b.code, 0, b.out)
   assert.match(b.out, /sin cambios/)
+  assert.doesNotMatch(b.out, /\/hooks/, 'no pide revisar hooks si su hash no cambió')
   assert.deepEqual(snapshot(sb), first)
 })
 
 test('init instala runtime, skills, agents, hooks y el kit Codex (sesion ChatGPT)', () => {
   const sb = sandbox()
-  assert.equal(orq(sb, ['init', '--offline']).code, 0)
+  const init = orq(sb, ['init', '--offline'])
+  assert.equal(init.code, 0)
+  assert.match(init.out, /\/hooks/, 'Codex exige confiar el hash nuevo de hooks antes de ejecutarlos')
   const s = settings(sb)
   const cmds = Object.values(s.hooks).flat().flatMap((g: any) => g.hooks.map((h: any) => h.command))
   assert.ok(cmds.every((c: string) => c.includes('.orquestador/runtime/dist/cli.js')))
@@ -49,7 +52,9 @@ test('init instala runtime, skills, agents, hooks y el kit Codex (sesion ChatGPT
   assert.ok(existsSync(path.join(sb.home, '.claude', 'agents', 'tester.md')))
   assert.ok(existsSync(path.join(sb.home, '.codex', 'agents', 'reviewer.toml')))
   assert.match(readFileSync(path.join(sb.home, '.codex', 'AGENTS.md'), 'utf8'), /ORQUESTADOR:START/)
-  assert.match(readFileSync(path.join(sb.home, '.codex', 'hooks.json'), 'utf8'), /hook git-guard/)
+  const codexHooks = readFileSync(path.join(sb.home, '.codex', 'hooks.json'), 'utf8')
+  assert.match(codexHooks, /hook git-guard/)
+  assert.equal(codexHooks.split('hook metrics').length - 1, 3, 'Codex registra request/start/stop de subagentes nativos')
   assert.equal(s.permissions.defaultMode, undefined, 'no siembra bypassPermissions')
 })
 

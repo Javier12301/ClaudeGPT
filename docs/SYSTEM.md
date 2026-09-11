@@ -326,7 +326,7 @@ flowchart TD
         SL["orq statusline<br/><i>rate_limits por stdin</i>"]
     end
     R -->|DIRECT| R
-    R -->|DELEGATED| SA["Subagentes Claude<br/>explorador · tester · constructor"]
+    R -->|DELEGATED| SA["Subagentes nativos estrechos<br/>Claude o Codex interactivo"]
     R -->|"orq run"| RT
     subgraph RT["Runtime orq (Node)"]
         Q["quota: veredicto + estado"]
@@ -357,8 +357,8 @@ flowchart TD
 | Topología | Qué es | Runtime |
 |---|---|---|
 | DIRECT | El razonador hace todo | nada |
-| DELEGATED | El razonador planifica, un worker ejecuta | subagente Claude u `orq run` |
-| ASYNC_REVIEW | Review adversarial no bloqueante de algo ya verde | `orq run --background` |
+| DELEGATED | El razonador planifica, un worker ejecuta | subagente nativo u `orq run` |
+| ASYNC_REVIEW | Review adversarial no bloqueante de algo ya verde | un `reviewer` nativo u `orq run --background`; máximo 1 por tarea |
 | PARALLEL | Dos unidades independientes a la vez | `orq worktree` si ambas escriben |
 
 ### Módulos
@@ -388,8 +388,17 @@ flowchart TD
 | `docs-researcher` | cheap | docs | Documentación actual |
 
 Todos declaran `sandbox_mode = "danger-full-access"` en su `.toml` (D-017: bajo
-`[windows] sandbox = "elevated"` los otros modos no pueden lanzar procesos). Para
-los lectores la barrera es el prompt más `agents.enabled=false`.
+la política administrada de Windows no se pudo verificar un `read-only`
+efectivo). Para los lectores la barrera es el prompt más
+`agents.enabled=false`, no el sandbox. La revalidación con Codex 0.153.4 quedó
+documentada en D-017.
+
+Codex interactivo usa la API nativa con `[agents] enabled`,
+`max_concurrent_threads_per_session`, `default_subagent_model` y
+`default_subagent_reasoning_effort`; los roles viven en
+`~/.codex/agents/*.toml`. `fork_turns` pertenece a la llamada `spawn_agent`, no
+al archivo de configuración. DIRECT sigue siendo el default aunque los agentes
+estén habilitados.
 
 ### Modelos por tier
 
@@ -546,9 +555,16 @@ en la config del usuario no se ve.
 - Respaldo antes de cada escritura; uninstall guiado por manifiesto.
 - No siembra `defaultMode: bypassPermissions`; no impone claves globales en
   `~/.codex/config.toml`.
+- Codex exige confianza interactiva por hash para hooks de usuario. Si `init`
+  cambia `~/.codex/hooks.json`, indica revisar `/hooks`; no usa bypass. `doctor`
+  valida presencia y cardinalidad, pero la CLI no expone un estado estable de
+  trust para que V2 lo diagnostique automáticamente.
 
 ### Windows
 
-Codex con `[windows] sandbox = "elevated"`: solo `danger-full-access` puede
-lanzar procesos (error 1920 en los otros). Por eso los roles lo declaran en su
-`.toml`, auditable, sin flags de bypass (D-017).
+Codex con `[windows] sandbox = "elevated"` conserva `danger-full-access` en los
+roles. La prueba con 0.153.4 no reprodujo el error 1920, pero la política
+administrada siguió imponiendo `danger-full-access` aun solicitando
+`read-only`, así que no demostró que el sandbox reducido funcione. Los roles
+lectores se restringen por instrucciones y `agents.enabled=false`, sin flags de
+bypass (D-017).

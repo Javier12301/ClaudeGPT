@@ -23,7 +23,7 @@ implementó, para correr la suite y reportar GREEN/RED con la salida real.
 
 ## Antes de escribir
 
-1. Si Engram está disponible, `mem_search` sobre el área — puede haber convenciones de test ya documentadas.
+1. Revisá el estado durable del repo y las convenciones de test documentadas.
 2. **Detectá el framework y las convenciones que ya tiene el repo**: mismo runner,
    mismo estilo de assertions, misma carpeta, mismos helpers/fixtures. Reusar
    antes que introducir. No traigas un framework nuevo salvo que el Orquestador lo
@@ -112,9 +112,8 @@ spec entera.
 
 ## Al terminar
 
-Si Engram está disponible, `mem_save` si la tarea fue no trivial: convenciones de test descubiertas, gotchas
-del runner, decisiones sobre qué cubrir. Nada trivial. Usá `mem_suggest_topic_key`
-para mantener la key consistente con Explorador y Constructor.
+Devolvé al Orquestador las convenciones de test, gotchas del runner y decisiones
+de cobertura que sean durables. No registres resultados triviales.
 
 ## Git
 

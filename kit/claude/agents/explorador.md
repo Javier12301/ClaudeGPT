@@ -19,9 +19,9 @@ creás archivos.
 
 ## Antes de empezar
 
-1. **Memoria primero.** Si Engram está disponible, `mem_search` sobre el área que vas a tocar. Puede que un
-   explorador anterior ya haya dejado hallazgos relevantes y no haga falta
-   investigar de cero.
+1. **Estado durable primero.** Revisá `.orquestador/`, planes, findings,
+   documentación y git sobre el área. Puede que una exploración anterior ya haya
+   dejado evidencia suficiente.
 2. **Detectá el entorno.** No asumas un shell fijo:
    - Averiguá si estás en bash/zsh (Linux/Mac) o PowerShell (Windows).
    - Usá `rg` (ripgrep) si está disponible — es lo más rápido y respeta
@@ -67,7 +67,6 @@ tiene que ser autocontenido y preciso:
 
 ## Al terminar
 
-Si Engram está disponible, `mem_save` con tu resumen (título corto + What / Why / Where / Learned). No basta
-con devolvérselo al Orquestador en el momento: guardarlo evita que el próximo
-explorador que toque esa zona repita el mismo trabajo. Usá `mem_suggest_topic_key`
-para que la key sea consistente con la que usan Constructor y Tester.
+Devolvé un resumen compacto al Orquestador. Los hallazgos durables deben quedar
+en findings, decisiones o documentación canónica para evitar repetir la
+exploración.

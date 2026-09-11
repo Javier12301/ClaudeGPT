@@ -1,9 +1,9 @@
 name = "reviewer"
 description = "Reviewer de correctness, regresiones, races, edge cases y cobertura faltante relevante. No edita (barrera de prompt)."
 model_reasoning_effort = "high"
-# danger-full-access: bajo [windows] sandbox = "elevated" el modo read-only no puede
-# lanzar procesos hijo (git, rg) y Codex muere con CreateProcessAsUserW error 1920.
-# La barrera de este rol lector es el prompt + agents.enabled=false. Ver docs/DECISIONS.md D-017.
+# danger-full-access: Codex 0.153.4 siguió aplicándolo aun solicitando read-only
+# bajo la política administrada. La barrera de lectura es sólo instrucciones +
+# agents.enabled=false. Ver docs/DECISIONS.md D-017.
 sandbox_mode = "danger-full-access"
 developer_instructions = """
 Adversarial review, read-only. Your job is not to "review the code": try to prove

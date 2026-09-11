@@ -682,7 +682,7 @@ C. Mover los cuatro roles lectores a `danger-full-access`, igual que los que
    `agents.enabled=false`.
 
 ### Decisión
-C. Los nueve roles del kit se declaran `danger-full-access` en su `.toml`.
+C. Los roles del kit se declaran `danger-full-access` en su `.toml`.
 
 ### Motivo
 A deja el flujo con un `reviewer` que no puede hacer su trabajo. B cambia el
@@ -698,12 +698,21 @@ sigue sin usarse.
 - Para los roles lectores, la única barrera contra escritura es el prompt ("review
   without editing") y `agents.enabled=false`. El diff se sigue evaluando en
   Claude, que es el árbitro final.
-- `verify.ps1` deja de distinguir roles lectores y escritores: exige
-  `danger-full-access` en los nueve.
+- La instalación deja de distinguir roles lectores y escritores: conserva
+  `danger-full-access` en los seis roles actuales.
 - `install.ps1` copia los `.toml` tal cual y avisa si alguno no está en
   `danger-full-access`. El fix viaja con el kit a cualquier repo que reinstale.
 - En un entorno sin `[windows] sandbox = "elevated"`, `read-only` volvería a
   funcionar; la decisión es específica de Windows elevated y así queda anotada.
+
+### Revalidación 2026-09-11
+
+Con Codex CLI 0.153.4 se ejecutaron `git` y `rg` solicitando `-s read-only`.
+No reapareció el error 1920, pero el banner efectivo siguió mostrando
+`sandbox: danger-full-access` por la política administrada de esta máquina.
+La prueba no demuestra que `read-only` funcione y por eso no se reducen permisos.
+En `reviewer`, `security-reviewer` y `docs-researcher`, sólo lectura es una
+barrera de instrucciones más `agents.enabled=false`, no una garantía de sandbox.
 
 ### Referencias
 docs/SYSTEM.md § Invariantes del wrapper y § Windows · D-002 · commit `411462b` ·
@@ -895,6 +904,8 @@ el multiagente que el V2 quiere evitar.
 
 ## D-022 — Code intelligence: codegraph detrás de una interfaz, Serena hasta que muera el PowerShell
 
+Estado: Reemplazada por D-032
+
 Estado: Aceptada
 Fecha: 2026-09-10
 
@@ -1046,7 +1057,7 @@ rules cubren `Bash` y `PowerShell`.
 
 ## D-029 — Engram como compatibilidad, no como core
 
-Estado: Aceptada
+Estado: Reemplazada por D-033
 Fecha: 2026-09-10
 
 ### Decisión
@@ -1133,4 +1144,31 @@ para una herramienta que ya no ve el código del repo.
 + Menos superficie: un backend menos, sin dependencia de Python.
 - Se pierde la precisión LSP en referencias; `orq codeintel refs` usa el grafo de
   codegraph. Si hiciera falta, `CodeIntelProvider` permite volver a sumar un backend.
-- Un `orq.config.json` con `"codeIntel": "serena"` cae a codegraph sin error.
+- Una configuración histórica con un backend ya retirado cae a codegraph sin
+  convertir la migración en error.
+
+## D-033 — Engram fuera del core V2
+
+Estado: Aceptada
+Fecha: 2026-09-11
+
+### Contexto
+
+V2 ya conserva estado durable en `.orquestador/`, decisiones, planes, findings,
+telemetría, jobs y git. Mantener además Engram en prompts y archivos versionados
+sumaba una capa sin ownership claro sobre instalaciones globales del usuario.
+
+### Decisión
+
+Engram deja de formar parte del core V2. El runtime, `init`, `doctor`, las skills
+y los agentes no lo consultan, instalan ni exigen. Se eliminan `.engram/` y las
+instrucciones `mem_*` del repo. `migrate` y `uninstall` conservan plugins o
+configuración global preexistentes porque V2 no puede demostrar que le
+pertenezcan.
+
+### Consecuencias
+
++ Menos capas de estado y ningún warning por ausencia de Engram.
++ Codex standalone y Claude usan las mismas fuentes durables del proyecto.
+- V2 no administra ni limpia una instalación global heredada del V1; el usuario
+  puede mantenerla para otros proyectos.

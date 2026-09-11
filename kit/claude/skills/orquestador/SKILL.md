@@ -73,9 +73,9 @@ de mucho trabajo, o si algo falló por cuota.
 
 ## Antes de tocar nada
 
-**Contexto.** Lo que ya sabés de esta sesión es el primer escalón. Si Engram está
-disponible, `mem_search` sobre el área; si ya tiene contexto reciente y
-suficiente, salteá la exploración.
+**Contexto.** Lo que ya sabés de esta sesión es el primer escalón. Después mirá
+el estado durable del repo (`.orquestador/`, planes, findings, decisiones y git)
+antes de explorar de nuevo.
 
 **Preguntas.** Tarea clara y acotada: cero preguntas. Falta una decisión con
 impacto real (alcance ambiguo, dos caminos con consecuencias distintas, bug sin

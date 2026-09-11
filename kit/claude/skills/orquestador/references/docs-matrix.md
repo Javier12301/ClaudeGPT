@@ -65,6 +65,5 @@ Escala con la ruta.
 - **Comportamiento acotado**: implementación, test dirigido en GREEN,
   verificación por alcance, review del diff.
 - **Riesgo de negocio**: todo lo anterior más contrato congelado, tester
-  independiente, reviewer adversarial, **doc sync si hubo impacto**, Engram si
-  quedó conocimiento reutilizable, y ROADMAP actualizado si cambió el estado de
-  una fase.
+  independiente, reviewer adversarial, **doc sync si hubo impacto**, y ROADMAP
+  actualizado si cambió el estado de una fase.

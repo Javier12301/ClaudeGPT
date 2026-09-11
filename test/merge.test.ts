@@ -125,15 +125,39 @@ test('review: un permiso que el usuario ya tenia no se borra en uninstall', () =
 
 test('codex hooks.json: idempotente, conserva lo ajeno, reemplaza el guard V1', () => {
   const v1 = { description: 'x', hooks: { PreToolUse: [
-    { matcher: '^Bash$', hooks: [{ type: 'command', commandWindows: 'powershell ... orquestador-git-guard.ps1', command: 'powershell ... orquestador-git-guard.ps1' }] },
+    { matcher: '^Bash$', hooks: [{ type: 'command', commandWindows: 'powershell -File ~/.codex/hooks/orquestador-git-guard.ps1', command: 'powershell -File ~/.codex/hooks/orquestador-git-guard.ps1' }] },
     { matcher: '^Edit$', hooks: [{ type: 'command', command: 'otro' }] },
   ] } }
   const once = mergeCodexHooks(v1, ctx)
   assert.deepEqual(mergeCodexHooks(once, ctx), once)
-  assert.equal(once.hooks.PreToolUse.length, 2)
+  assert.equal(once.hooks.PreToolUse.length, 3)
   assert.ok(once.hooks.PreToolUse.some((g: any) => g.hooks[0].command === 'otro'))
+  assert.ok(once.hooks.PreToolUse.some((g: any) => g.matcher.includes('spawn_agent') && g.hooks[0].command.includes('hook metrics')))
+  assert.equal(once.hooks.SubagentStart.filter((g: any) => g.hooks[0].command.includes('hook metrics')).length, 1)
+  assert.equal(once.hooks.SubagentStop.filter((g: any) => g.hooks[0].command.includes('hook metrics')).length, 1)
   assert.ok(!JSON.stringify(once).includes('.ps1'))
-  assert.deepEqual(unmergeCodexHooks(once).hooks.PreToolUse, [v1.hooks.PreToolUse[1]])
+  const clean = unmergeCodexHooks(once)
+  assert.deepEqual(clean.hooks.PreToolUse, [v1.hooks.PreToolUse[1]])
+  assert.equal(clean.hooks.SubagentStart, undefined)
+  assert.equal(clean.hooks.SubagentStop, undefined)
+})
+
+test('codex hooks.json: uninstall conserva hooks de lifecycle ajenos', () => {
+  const user = { hooks: {
+    SubagentStart: [{ matcher: '^reviewer$', hooks: [{ type: 'command', command: 'user-start' }] }],
+    SubagentStop: [{ matcher: '^reviewer$', hooks: [{ type: 'command', command: 'user-stop' }] }],
+  } }
+  const installed = mergeCodexHooks(user, ctx)
+  assert.deepEqual(unmergeCodexHooks(installed), user)
+})
+
+test('codex hooks.json: un script ajeno con nombre parecido al V1 se conserva', () => {
+  const user = { hooks: { PreToolUse: [{ matcher: '^Agent$', hooks: [
+    { type: 'command', command: 'C:/tools/orq-metrics.ps1 --personal' },
+  ] }] } }
+  const installed = mergeCodexHooks(user, ctx)
+  assert.ok(JSON.stringify(installed).includes('C:/tools/orq-metrics.ps1'))
+  assert.deepEqual(unmergeCodexHooks(installed), user)
 })
 
 test('AGENTS.md: bloque administrado idempotente y removible', () => {

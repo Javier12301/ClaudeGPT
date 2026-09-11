@@ -86,11 +86,9 @@ Si notás que un test se puede hacer pasar sin resolver el problema, decilo.
    fix, breaking change), agregá una entrada en `CHANGELOG.md` bajo
    `[Unreleased]`, formato Keep a Changelog. Cambios internos invisibles
    (refactor puro, renombre privado) no llevan entrada.
-3. **Engram** (si está disponible): `mem_save` si la tarea fue no trivial — título corto +
-   What / Why / Where / Learned. **No guardes** cambios triviales (typos,
-   formateo, renombres mecánicos): solo decisiones con contexto que valga la pena
-   recuperar después. Usá `mem_suggest_topic_key` para mantener la key consistente
-   con la que usan Explorador y Tester.
+3. Si descubriste una decisión o un riesgo durable, devolvelo al Orquestador para
+   que lo registre en findings, decisiones o documentación canónica. No registres
+   cambios triviales como typos, formato o renombres mecánicos.
 
 ## Git
 

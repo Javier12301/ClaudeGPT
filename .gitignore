@@ -2,6 +2,10 @@
 .orquestador/
 # Indice de code intelligence (codegraph).
 .codegraph/
+# Residuos de herramientas externas que V2 no administra.
+.serena/
+.engram/
+.atl/.skill-registry.cache.json
 # Build y dependencias.
 node_modules/
 dist/

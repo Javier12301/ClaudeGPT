@@ -126,6 +126,7 @@ async function install(o: InitOptions, partial: { m: Manifest | null }): Promise
     mcp: { claude: prev?.mcp.claude ?? [], codex: prev?.mcp.codex ?? [] }, codeIntel: prev?.codeIntel ?? 'none', codex: false }
   partial.m = m
   const ctx = { runtimeCli: runtimeCli() }
+  let codexHooksChanged = false
   const prevFiles = new Set(prev?.files ?? [])
   // Un archivo que existe y no es nuestro (no estaba en el manifiesto anterior):
   // se preserva su original antes de reemplazarlo, para que uninstall lo devuelva.
@@ -165,7 +166,7 @@ async function install(o: InitOptions, partial: { m: Manifest | null }): Promise
     const hooksFile = path.join(codexHome(), 'hooks.json')
     const hooks = readJsonStrict(hooksFile) as { ok: true; doc: any } // validado en preflight
     if (!existsSync(hooksFile)) m.created.push(hooksFile)
-    tx.write(hooksFile, json(mergeCodexHooks({ description: 'User-level Codex hooks', ...hooks.doc }, ctx)))
+    codexHooksChanged = tx.write(hooksFile, json(mergeCodexHooks({ description: 'User-level Codex hooks', ...hooks.doc }, ctx)))
   }
 
   // 4. MCPs y code intelligence (comandos externos: se saltean en --dry-run).
@@ -230,6 +231,7 @@ async function install(o: InitOptions, partial: { m: Manifest | null }): Promise
   if (merged.report.statusLine === 'foreign') log('AVISO: tenes otra statusLine configurada; no se piso. El gate no va a ver la cuota de Claude (degrada a BALANCED).')
   if (o.claudeOnly) log('Modo --claude-only: kit Codex salteado.')
   else if (cx.auth !== 'chatgpt') log(`Codex ${cx.installed ? 'sin sesion ChatGPT' : 'no instalado'}: modo Claude-solo. Para el entorno hibrido: codex login (Sign in with ChatGPT) y orq init.`)
+  else if (codexHooksChanged && !o.dryRun) log('Codex exige confiar cada hash nuevo de hooks: abri una sesion interactiva, ejecuta `/hooks` y revisa `~/.codex/hooks.json`. No uses flags de bypass.')
   const legacy = legacyArtifacts()
   if (legacy.length) log(`Instalacion V1 (PowerShell) detectada (${legacy.length} artefactos): orq migrate`)
   if (!which('orq')) log(`\`orq\` no esta en el PATH. Hasta el release: npm link (desde el repo) o node "${runtimeCli()}".`)
@@ -288,6 +290,8 @@ export async function doctorCommand(o: { json: boolean }): Promise<number> {
     const h = readJsonStrict(path.join(codexHome(), 'hooks.json'))
     const n = h.ok ? JSON.stringify(h.doc).split('hook git-guard').length - 1 : 0
     add('codex git-guard', h.ok && n === 1 ? 'ok' : 'fail', h.ok ? `${n} registro(s)` : h.error, 'orq init')
+    const metrics = h.ok ? JSON.stringify(h.doc).split('hook metrics').length - 1 : 0
+    add('codex metrics', h.ok && metrics === 3 ? 'ok' : 'fail', h.ok ? `${metrics} registro(s), esperado 3` : h.error, 'orq init')
     const r = resolveCommand('codex')
     if (r) {
       const d = await run(r, ['doctor', '--summary'], { timeoutMs: 120_000 })

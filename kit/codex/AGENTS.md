@@ -8,8 +8,9 @@ cuando Codex corre como worker de `orq run`.
 - **Worker (`orq run`, `codex exec` con `--output-schema` y `agents.enabled=false`)**:
   no sos el razonador. Ejecutas exactamente la tarea recibida, no amplias el
   alcance, no creas subagentes y devolves solo el contrato de salida pedido.
-- **Sesion interactiva propia**: sos el unico razonador de la tarea. Resolves
-  directo por defecto; delegas solo con un motivo concreto (ver abajo).
+- **Sesion interactiva propia**: sos el unico razonador y Tech Lead de la tarea,
+  incluso si Claude Code no esta disponible. Resolves directo por defecto;
+  delegas solo con un motivo concreto (ver abajo).
 
 ## Delegacion: default NO
 
@@ -26,6 +27,23 @@ contaminaria tu contexto. Si no podes nombrar cual, lo haces vos.
   numero acotado; nunca historial completo junto con `agent_type`.
 - Registrar la decision: `orq metrics --decision delegated|not_delegated --reason <motivo>`
   (con `ORQ_SESSION_ID` fijado a tu id de sesion si queres filtrar por sesion).
+
+## Topologias nativas
+
+- **DIRECT**: el principal resuelve; cero subagentes. Es el default.
+- **DELEGATED**: un subagente ejecuta una unidad delimitada; el principal
+  conserva arquitectura, decisiones y arbitraje.
+- **ASYNC_REVIEW**: como maximo un `reviewer` por tarea revisa una fase GREEN
+  mientras el principal avanza sobre trabajo independiente. El reviewer no
+  edita ni implementa findings.
+- **PARALLEL**: solo unidades independientes. Dos writers usan worktrees
+  separados creados con `orq worktree`; nunca escriben los mismos archivos.
+
+La configuracion actual de Codex usa `[agents]` con `enabled`,
+`max_concurrent_threads_per_session`, `default_subagent_model` y
+`default_subagent_reasoning_effort`. `fork_turns` es un argumento de
+`spawn_agent`, no una clave de `config.toml`. Los roles personalizados viven en
+`~/.codex/agents/*.toml`.
 
 ## Checkpoints y resultados
 

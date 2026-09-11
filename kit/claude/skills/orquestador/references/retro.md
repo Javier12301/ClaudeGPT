@@ -155,5 +155,6 @@ log entra como hecho verificado, no como archivo a explorar.
 ajusta. Un orquestador que se auto-modifica a partir de su propia retro cierra el
 loop sobre sí mismo y deja de tener control externo.
 
-Lo que sí hacés: si Engram está disponible, `mem_save` de los hallazgos con evidencia, para que la próxima
-retro no vuelva a descubrir lo mismo.
+Los hallazgos aceptados con evidencia quedan en findings, decisiones o
+documentación canónica según su alcance, para que la próxima retro no los
+descubra de nuevo.

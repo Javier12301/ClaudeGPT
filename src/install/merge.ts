@@ -9,7 +9,7 @@
 
 export const RUNTIME_MARK = '.orquestador/runtime'
 // Lo que instalaba el kit PowerShell (V1). Se reemplaza al migrar.
-export const LEGACY_MARK = /git-guard\.ps1|orq-metrics\.ps1|statusline-wrapper\.ps1|codex-run\.ps1|orquestador-git-guard\.ps1/
+export const LEGACY_MARK = /(?:^|[\\/])\.claude[\\/](?:hooks[\\/](?:git-guard|orq-metrics)\.ps1|statusline-wrapper\.ps1|scripts[\\/]codex-run\.ps1)|(?:^|[\\/])\.codex[\\/]hooks[\\/]orquestador-git-guard\.ps1/i
 
 type Json = Record<string, any>
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x ?? {}))
@@ -146,15 +146,22 @@ export function mergeCodexHooks(doc: Json, ctx: Ctx): Json {
   out.hooks ??= {}
   const pre = stripOurs(out.hooks.PreToolUse)
   pre.push({ matcher: '^Bash$', hooks: [{ type: 'command', command: orqCmd(ctx, 'hook git-guard'), timeout: 5, statusMessage: 'Validando politica Git' }] })
+  pre.push({ matcher: '^(Agent|spawn_agent)$', hooks: [{ type: 'command', command: orqCmd(ctx, 'hook metrics'), timeout: 10 }] })
   out.hooks.PreToolUse = pre
+  for (const event of ['SubagentStart', 'SubagentStop']) {
+    out.hooks[event] = [...stripOurs(out.hooks[event]), { hooks: [{ type: 'command', command: orqCmd(ctx, 'hook metrics'), timeout: 10 }] }]
+  }
   return out
 }
 
 export function unmergeCodexHooks(doc: Json): Json {
   const out = clone(doc)
-  const pre = stripOurs(out.hooks?.PreToolUse)
-  if (pre.length) out.hooks.PreToolUse = pre
-  else if (out.hooks) delete out.hooks.PreToolUse
+  for (const event of ['PreToolUse', 'SubagentStart', 'SubagentStop']) {
+    const kept = stripOurs(out.hooks?.[event])
+    if (kept.length) out.hooks[event] = kept
+    else if (out.hooks) delete out.hooks[event]
+  }
+  if (out.hooks && !Object.keys(out.hooks).length) delete out.hooks
   return out
 }
 

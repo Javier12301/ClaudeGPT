@@ -68,8 +68,8 @@ terminar la unidad actual -> tests -> working tree consistente
 ```
 
 El checkpoint guarda objetivo, GREEN/RED, qué se terminó, qué falta, decisiones,
-riesgos y **el siguiente paso concreto** (en Engram si está disponible; si no,
-en la respuesta al usuario).
+riesgos y **el siguiente paso concreto** en el estado durable del proyecto y en
+la respuesta al usuario.
 
 ## Qué rol de Codex, cuándo
 

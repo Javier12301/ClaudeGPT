@@ -35,7 +35,7 @@ buscar dónde vive cada cosa allá. `docs/SYSTEM.md` es la respuesta por defecto
 ### Escalera de detección — barata, se corta al primer hit
 
 ```
-1. mem_search                                      (ya lo hizo la Fase 0)
+1. .orquestador/ + planes + findings + git
 2. CLAUDE.md / AGENTS.md / .cursor/rules/ /
    .github/copilot-instructions.md
 3. orq codeintel orient                              (estructura, casi gratis)
@@ -72,8 +72,8 @@ la sección que redactó una persona es destruir su trabajo.
 
 **S3 — El bootstrap siempre pide aprobación, una sola vez por proyecto.** Nunca
 automático, ni siquiera en un repo vacío. Ofrecelo la primera vez que trabajás en
-ese proyecto y **guardá la respuesta en Engram**. Si el usuario dice que no, no se
-vuelve a preguntar.
+ese proyecto y registrá la respuesta en una decisión durable del proyecto. Si el
+usuario dice que no, no se vuelve a preguntar.
 
 **S4 — Las instrucciones del proyecto ganan.** `CLAUDE.md`, `AGENTS.md` y
 `.cursor/rules` del repo tienen prioridad sobre estas reglas cuando se contradicen.
@@ -83,11 +83,10 @@ Nunca rellenes una sección con arquitectura o reglas deducidas a ojo: **una reg
 de negocio inventada es peor que ninguna, porque se ve igual que una real**.
 
 **S6 — Sin permiso de escritura, cero archivos.** En un repo de cliente o
-read-only, el conocimiento va a Engram y se le reporta al usuario. No se ensucia
-el repo ajeno.
+read-only, el conocimiento se reporta al usuario sin ensuciar el repo ajeno.
 
 **S7 — Degradación con gracia.** La ausencia de documentación **nunca bloquea**.
-Sin docs, el comportamiento es el de siempre: `explorador` + Engram. Este sistema
+Sin docs, el comportamiento es el de siempre: exploración dirigida. Este sistema
 es una optimización, no un prerrequisito.
 
 ---
@@ -370,31 +369,24 @@ sesión te cuesta tokens en vez de ahorrártelos.
 
 ---
 
-## Parte 10 — Engram y la promoción
+## Parte 10 — Estado durable y promoción
 
 ```
-DOCUMENTACIÓN  =  verdad persistente, escritura cara, lectura exacta
-ENGRAM         =  memoria operativa, escritura barata, lectura difusa
+DOCUMENTACIÓN  =  verdad persistente y lectura exacta
+.ORQUESTADOR   =  estado operativo de planes, findings, jobs y telemetría
 ```
-
-Engram degrada con el crecimiento del proyecto: lo viejo queda sepultado bajo lo
-nuevo. Por eso lo importante se promueve.
 
 **Regla de promoción, sin ambigüedad:**
 
 > Si lo vas a necesitar **buscar por nombre** → docs.
-> Si necesitás que **aparezca solo cuando toques esa zona** → Engram.
+> Si describe la ejecución de una tarea o sesión → `.orquestador/`.
 
-| Va a Engram | Va a docs |
+| Va a `.orquestador/` | Va a docs |
 |---|---|
-| Gotchas de una librería | Reglas de negocio |
-| Investigaciones recientes | Arquitectura vigente |
-| Bugs raros y su causa | Decisiones con trade-offs |
-| Convenciones descubiertas | Contratos e integraciones |
-| Checkpoints de sesión | Estado de las fases |
-
-Lo promovido **no se borra de Engram**: ahí no molesta, y borrarlo cuesta más de
-lo que ahorra.
+| Planes y checkpoints de sesión | Reglas de negocio |
+| Findings y ejecuciones recientes | Arquitectura vigente |
+| Jobs y telemetría | Decisiones con trade-offs |
+| Evidencia temporal de una tarea | Contratos e integraciones |
 
 No guardes en ninguno de los dos: logs, diffs, typos, resultados triviales, ni
 duplicados de lo que ya dice SYSTEM.
@@ -448,9 +440,7 @@ DECISIONS.md
         ↓
 ROADMAP.md  →  CHANGELOG.md
         ↓
-Engram
-        ↓
-historial del chat
+.orquestador/ + git
 ```
 
 Pero si la discrepancia es importante, **no elijas en silencio**: reportala.

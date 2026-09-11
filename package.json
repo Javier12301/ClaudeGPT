@@ -4,7 +4,7 @@
   "description": "Runtime portable para orquestar Claude Code + Codex: un razonador, delegación con utilidad demostrable, cuotas, contratos, telemetría e instalación determinista.",
   "type": "module",
   "bin": { "orq": "dist/cli.js" },
-  "files": ["dist", "kit", "README.md", "INSTALL.md", "CHANGELOG.md"],
+  "files": ["dist", "kit", "docs", "README.md", "INSTALL.md", "CHANGELOG.md", "LICENSE"],
   "engines": { "node": ">=22.16" },
   "scripts": {
     "build": "tsc -p tsconfig.json",

@@ -191,12 +191,10 @@ Windows, deja obsoleto el registry propio de abajo.
       ejecutarlos a ciegas.
 ### Decidido NO construir
 
-- **Rol `lead.toml` con `agents.enabled = true`** (un Codex que se auto-orquesta
-  cuando Claude se queda sin ventana). Reemplazado por `SONNET-LEAD`
-  ([D-013](DECISIONS.md#d-013--sonnet-lead-en-vez-de-codex-lead)): si el lead
-  barato es Sonnet, Codex no necesita auto-orquestarse nunca, y se conserva el
-  invariante de un solo Tech Lead. Cae con él todo el Relay Mode: `codex-lead.ps1`,
-  el puente de `request_user_input` y el thread persistente de `app-server`.
+- **Rol persistente `lead.toml` y Relay Mode.** Codex interactivo ya es el único
+  Tech Lead cuando el usuario trabaja desde Codex y puede delegar con sus
+  subagentes nativos. No hace falta otro rol lead, `codex-lead.ps1`, un puente de
+  `request_user_input` ni un thread persistente de `app-server`.
 - **`repo-map.ps1` con cache por hash del árbol git.** El census de estructura lo
   resuelve un `git ls-files` filtrado por manifests, documentado en la Fase 2 de
   la skill. El cache es la parte que se rompe sola. Se promueve a script solo si
@@ -237,14 +235,14 @@ solución: rompe `apply_patch` con split roots (openai/codex#32168, #32314).
 
 Estado: IN_PROGRESS. Ver [D-020](DECISIONS.md) a D-030 y CHANGELOG 2.0.0-rc.1.
 
-- [x] Runtime `orq` en Node/TypeScript, sin dependencias de runtime; 103 tests
+- [x] Runtime `orq` en Node/TypeScript, sin dependencias de runtime
 - [x] `init` / `doctor` / `uninstall` / `migrate` deterministas, idempotentes, con manifiesto
 - [x] Gate automático en `SessionStart` (P1 de la retro)
 - [x] Cuota de Claude desde el stdin de la statusLine; fuera ClaudeCodeStatusLine
 - [x] Telemetría por sesión, subagentes por `SubagentStart`/`Stop`, suites por
       PowerShell, `delegation_decision`, veredicto de findings (P0 de la retro)
 - [x] Topologías, ASYNC_REVIEW con tope, worktrees, checkpoints, planes con dependencias
-- [x] `CodeIntelProvider` con codegraph / serena / native
+- [x] `CodeIntelProvider` con codegraph / native
 - [x] Skill recortada (395 → 265 líneas), escritor por región, ejercitar la app real
 - [x] Base de la skill de Codex como razonador
 - [x] **Migrar esta máquina**: `orq migrate` sobre el home real y una sesión nueva
@@ -252,14 +250,13 @@ Estado: IN_PROGRESS. Ver [D-020](DECISIONS.md) a D-030 y CHANGELOG 2.0.0-rc.1.
 - [ ] **Corrida real en Linux y macOS** (instalar, doctor, una sesión, uninstall).
 - [ ] **`npm publish`** — solo con la verificación end-to-end completa (INSTALL.md).
 - [x] **Decidir Serena**: retirada, codegraph es el único motor (D-032).
-- [ ] **Completar la skill de Codex** (`kit/codex/skills/orquestador`, sección
-      "Pendiente"): mapear topologías a subagentes nativos; verificar en uso que las
-      tareas triviales terminan sin ningún subagente. La hace Codex.
+- [x] **Completar la skill de Codex**: DIRECT por defecto, topologías nativas,
+      Codex standalone, aislamiento de contexto y roles estrechos.
 - [ ] **Recalibrar con datos**: después de ~25 tareas, `orq metrics --all` —
       umbrales 50/70/80 (BR-003), cuántas `not_delegated` terminaron en `rework`,
       tasa de findings aceptados por rol (¿el reviewer encuentra bugs reales?).
-- [ ] **Revisar Engram** (D-029): si en N sesiones `mem_search` no cambió ninguna
-      decisión, se retira de los prompts.
+- [x] **Retirar Engram del core V2** (D-033): sin runtime, prompts, instalación,
+      diagnóstico ni estado versionado; instalaciones globales ajenas se conservan.
 - [ ] **Caveman**: solo si la telemetría muestra output narrativo inútil medible.
 - [ ] Borrar `legacy/` cuando `orq migrate` se haya usado en real sin problemas.
 
@@ -274,4 +271,3 @@ Estado: IN_PROGRESS. Ver [D-020](DECISIONS.md) a D-030 y CHANGELOG 2.0.0-rc.1.
 - Un workflow nativo de Claude Code (dynamic workflows) no pasa por el gate de cuota.
 - El hook `SessionStart` agrega dos líneas de contexto también en repos donde no
   se orquesta.
-

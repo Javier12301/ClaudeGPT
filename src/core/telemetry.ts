@@ -54,7 +54,7 @@ export function testResult(output: string, exitCode?: number | null): 'RED' | 'G
   return PASSING.test(output ?? '') ? 'GREEN' : 'UNKNOWN'
 }
 
-// --- hook: un evento de Claude Code -> 0 o 1 fila ---
+// --- hook: un evento de Claude Code o Codex -> 0 o 1 fila ---
 export interface HookEvent {
   hook_event_name?: string; session_id?: string; cwd?: string
   tool_name?: string; tool_use_id?: string; tool_input?: any; tool_response?: any
@@ -69,11 +69,15 @@ export function rowFromHook(ev: HookEvent): { event: string; fields: Record<stri
     case 'SubagentStop':
       return { event: 'subagent_stop', fields: { agent_id: ev.agent_id, agent_type: ev.agent_type } }
     case 'PreToolUse':
-      if (ev.tool_name === 'Agent' || ev.tool_name === 'Task') {
+      if (ev.tool_name === 'Agent' || ev.tool_name === 'Task' || ev.tool_name === 'spawn_agent') {
+        const codex = ev.tool_input?.agent_type != null || ev.tool_input?.task_name != null || ev.tool_input?.fork_turns != null
         return { event: 'spawn_request', fields: {
-          agent_type: ev.tool_input?.subagent_type || 'general-purpose',
-          task: ev.tool_input?.description ?? '', isolation: ev.tool_input?.isolation ?? null,
-          background: ev.tool_input?.run_in_background ?? null, tool_use_id: ev.tool_use_id } }
+          agent_type: ev.tool_input?.agent_type ?? ev.tool_input?.subagent_type ?? 'general-purpose',
+          task: ev.tool_input?.task_name ?? ev.tool_input?.description ?? '',
+          isolation: ev.tool_input?.fork_turns ?? ev.tool_input?.isolation ?? null,
+          background: ev.tool_input?.run_in_background ?? null, tool_use_id: ev.tool_use_id,
+          ...(codex ? { provider: 'codex' } : {}),
+        } }
       }
       return null
     case 'PostToolUse': {
@@ -103,24 +107,24 @@ export function readRows(repo: string, session?: string | 'all' | null): { rows:
 }
 
 // Duracion real de cada subagente: SubagentStart/Stop apareados por agent_id.
-// El task sale del spawn_request del mismo tipo, en orden (FIFO por tipo).
+// El task se enlaza al agent_id cuando llega SubagentStart. Así, dos agentes del
+// mismo tipo pueden terminar en cualquier orden sin cruzar sus tareas.
 export function subagentRuns(rows: Row[]) {
-  const starts = new Map<string, Row>()
+  const starts = new Map<string, { row: Row; task: string }>()
   const requests = new Map<string, Row[]>()
   const runs: { agent_type: string; task: string; duration_s: number | null }[] = []
   for (const r of rows) {
     if (r.event === 'spawn_request') {
       const k = String(r.agent_type); requests.set(k, [...(requests.get(k) ?? []), r])
     } else if (r.event === 'subagent_start') {
-      starts.set(String(r.agent_id), r)
+      const type = String(r.agent_type ?? '?')
+      const req = requests.get(type)?.shift()
+      starts.set(String(r.agent_id), { row: r, task: String(req?.task ?? '') })
     } else if (r.event === 'subagent_stop') {
       const s = starts.get(String(r.agent_id))
-      const type = String(r.agent_type ?? s?.agent_type ?? '?')
-      // ponytail: FIFO por tipo para el task; con spawns paralelos del mismo tipo
-      // el texto puede cruzarse, la duracion no (va por agent_id).
-      const req = requests.get(type)?.shift()
-      runs.push({ agent_type: type, task: String(req?.task ?? ''),
-        duration_s: s ? Math.round((Date.parse(r.ts) - Date.parse(s.ts)) / 100) / 10 : null })
+      const type = String(r.agent_type ?? s?.row.agent_type ?? '?')
+      runs.push({ agent_type: type, task: s?.task ?? '',
+        duration_s: s ? Math.round((Date.parse(r.ts) - Date.parse(s.row.ts)) / 100) / 10 : null })
       starts.delete(String(r.agent_id))
     }
   }
@@ -162,7 +166,7 @@ export function formatReport(repo: string, session: string | 'all' | null = null
   L.push(`gate de presupuesto        ${s.gateRan ? 'corrio al arrancar' : 'NO CORRIO en esta sesion'}`)
   L.push(`decisiones de delegacion   ${s.delegated} delegadas / ${s.notDelegated} directas`)
   for (const [k, v] of Object.entries(group(s.decisions, 'reason'))) L.push(`  ${k.padEnd(26)} ${v}`)
-  L.push('', `subagentes Claude          ${s.runs.length}${s.stillRunning ? ` (+${s.stillRunning} sin terminar)` : ''}`)
+  L.push('', `subagentes nativos         ${s.runs.length}${s.stillRunning ? ` (+${s.stillRunning} sin terminar)` : ''}`)
   const byType: Record<string, number[]> = {}
   for (const r of s.runs) (byType[r.agent_type] ??= []).push(r.duration_s ?? NaN)
   for (const [t, ds] of Object.entries(byType)) {

@@ -11,17 +11,35 @@ correspondiente de [`docs/SYSTEM.md`](docs/SYSTEM.md) en el mismo diff.
 
 - README: prompt para que un agente instale o actualice el orquestador paso a
   paso en una máquina nueva.
+- README: flujo separado de instalación Codex standalone que instala y conecta
+  su skill, agentes, rules y hooks sin requerir Claude Code.
+- Skill Codex completa: DIRECT por defecto, cuatro topologías nativas, Codex
+  standalone y delegación sólo por beneficio concreto de contexto o ejecución.
+- CI sin cuota de modelos en Windows, Linux y macOS; licencia MIT publicada y
+  documentación incluida en el paquete npm.
 
 ### Fixed
 
 - Windows: `orq init` no encontraba `npm` y no instalaba codegraph. El
   `npm.cmd` del instalador de Node no usa el formato cmd-shim; `parseNpmShim`
   ahora reconoce los dos.
+- Los hooks de Codex ahora registran request, inicio y fin de subagentes nativos;
+  la telemetría entiende `agent_type`, `task_name` y `fork_turns`, y `doctor`
+  comprueba los tres hooks.
+- La integración acepta el nombre canónico `spawn_agent`, enlaza cada task al
+  `agent_id` al iniciar para tolerar finales fuera de orden y limita el retiro de
+  hooks V1 a sus rutas históricas, sin borrar scripts ajenos de nombre parecido.
+- `init` avisa que hay que revisar `/hooks` cuando cambia el hash de
+  `~/.codex/hooks.json`; Codex omite hooks de usuario nuevos hasta confiar ese
+  hash y V2 no usa el flag de bypass.
 
 ### Removed
 
 - Serena: backend `serena` de `CodeIntelProvider`, chequeo "code intel duplicado"
   de `orq doctor` y `.serena/` del repo. codegraph es el único motor (D-032).
+- Engram del core V2: estado versionado e instrucciones activas. `init`, `doctor`
+  y `uninstall` no administran plugins globales sin ownership (D-033).
+- Cache generado `.atl/.skill-registry.cache.json`.
 
 ## [2.0.0-rc.1] - 2026-09-10
 

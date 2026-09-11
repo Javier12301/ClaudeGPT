@@ -45,7 +45,27 @@ test('bug 2b: el hook convierte SubagentStart/Stop y el PreToolUse de Agent en f
   const req = rowFromHook({ hook_event_name: 'PreToolUse', tool_name: 'Agent', tool_input: { subagent_type: 'constructor', description: 'GREEN' } })
   assert.equal(req?.event, 'spawn_request')
   assert.equal(req?.fields.agent_type, 'constructor')
+  const native = rowFromHook({ hook_event_name: 'PreToolUse', tool_name: 'spawn_agent', tool_input: {
+    agent_type: 'reviewer', task_name: 'audit_auth', message: 'Revisar auth', fork_turns: 'none',
+  } })
+  assert.equal(native?.event, 'spawn_request')
+  assert.deepEqual(native?.fields, {
+    agent_type: 'reviewer', task: 'audit_auth', isolation: 'none', background: null,
+    tool_use_id: undefined, provider: 'codex',
+  })
   assert.equal(rowFromHook({ hook_event_name: 'PostToolUse', tool_name: 'Agent' }), null, 'el Post de Agent ya no se usa')
+})
+
+test('subagentes paralelos del mismo tipo conservan su task aunque terminen al revés', () => {
+  const rows = [
+    { ts: at(0), session_id: 's', event: 'spawn_request', agent_type: 'reviewer', task: 'primero' },
+    { ts: at(1), session_id: 's', event: 'subagent_start', agent_id: 'a1', agent_type: 'reviewer' },
+    { ts: at(2), session_id: 's', event: 'spawn_request', agent_type: 'reviewer', task: 'segundo' },
+    { ts: at(3), session_id: 's', event: 'subagent_start', agent_id: 'a2', agent_type: 'reviewer' },
+    { ts: at(8), session_id: 's', event: 'subagent_stop', agent_id: 'a2', agent_type: 'reviewer' },
+    { ts: at(13), session_id: 's', event: 'subagent_stop', agent_id: 'a1', agent_type: 'reviewer' },
+  ]
+  assert.deepEqual(subagentRuns(rows).runs.map(r => [r.task, r.duration_s]), [['segundo', 5], ['primero', 12]])
 })
 
 test('bug 3: una suite corrida por la tool PowerShell se registra', () => {

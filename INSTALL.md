@@ -91,6 +91,10 @@ No revierte las claves que el V1 imponía en `~/.codex/config.toml` (`model` fij
 `approval_policy = "never"`, `sandbox_mode = "danger-full-access"`): las nombra
 para que decidas. El V2 no las necesita.
 
+V2 deja de administrar Engram. Si la instalación V1 o el usuario ya tenían su
+plugin o configuración global, `migrate` los conserva porque no puede demostrar
+ownership del proyecto; el runtime, las skills y `doctor` no dependen de ellos.
+
 Abrí una sesión nueva de Claude Code después de migrar: los hooks se cargan al
 iniciar.
 
@@ -119,10 +123,16 @@ instalar. Los respaldos se conservan.
 | permisos | `bypassPermissions` activo | Decisión tuya; `orq` no lo necesita |
 | cuota Claude | Hay una lectura | Aparece tras la primera respuesta (planes Pro/Max) |
 | archivos del kit | Todos los del manifiesto | `orq init` |
-| codex git-guard · codex doctor | Hook de Codex y salud de Codex | `orq init` |
+| codex git-guard · codex metrics · codex doctor | Guard, telemetría de subagentes nativos y salud de Codex | `orq init` |
 | code intel · índice del repo | codegraph instalado; `.codegraph/` presente | `orq init`; `orq codeintel orient` |
 
 `orq doctor --json` para máquinas. Sale con 1 si hay algún FAIL.
+
+Cuando `orq init` cambia `~/.codex/hooks.json`, Codex invalida la confianza del
+hash anterior. Abrí una sesión interactiva, ejecutá `/hooks` y revisá ese archivo
+para habilitarlo. `orq` no automatiza esa decisión ni usa
+`--dangerously-bypass-hook-trust`. Hasta entonces los checks de presencia de
+`doctor` pueden estar GREEN aunque Codex omita esos hooks.
 
 ## Troubleshooting
 
@@ -148,9 +158,13 @@ bloquea un comando compuesto que contenga un push.
 **codegraph no se instaló** (red, proxy). `orq init --offline` y code intel cae a
 `git`; `orq init` de nuevo cuando haya red.
 
-**Codex falla con `CreateProcessAsUserW` error 1920 en Windows.** Un rol quedó
-fuera de `danger-full-access` bajo `[windows] sandbox = "elevated"` (D-017):
-`orq init` reinstala los roles del kit.
+**Codex falla con `CreateProcessAsUserW` error 1920 en Windows.** Los roles del
+kit conservan `danger-full-access` bajo `[windows] sandbox = "elevated"`
+(D-017). En Codex 0.153.4, pedir `-s read-only` bajo la política administrada de
+esta máquina siguió mostrando `danger-full-access`; no permitió demostrar un
+sandbox efectivo de sólo lectura. Para `reviewer`, `security-reviewer` y
+`docs-researcher`, "read-only" es una barrera de instrucciones, no de sandbox.
+`orq init` reinstala esos `.toml` sin usar flags de bypass.
 
 **Linux/macOS.** La lógica es la misma, pero todavía no hay una corrida real
 end-to-end fuera de Windows (ROADMAP). Reportá lo que encuentres con `orq doctor --json`.

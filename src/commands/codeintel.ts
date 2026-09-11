@@ -2,7 +2,7 @@
 //
 // El runtime nunca importa codegraph directamente: codegraph tiene bus factor 1
 // (un autor, 5 estrellas) y cambiar de motor tiene que ser cambiar una linea de
-// config, no reescribir el runtime. Dos backends (serena, deprecado en D-032):
+// config, no reescribir el runtime. Dos backends:
 //   codegraph  tree-sitter + grafo; lo instala orq init en un prefijo propio
 //   native     git ls-files + git grep; siempre disponible, es el fallback
 //
@@ -111,7 +111,7 @@ export const native: CodeIntelProvider = {
 const BACKENDS: Record<string, CodeIntelProvider> = { codegraph, native }
 
 // El configurado si esta disponible; si no, native. Nunca deja al runtime sin nada.
-// Un valor desconocido (p. ej. "serena" de una config vieja) cae a codegraph.
+// Un valor desconocido de una config vieja cae a codegraph.
 export async function codeIntel(root: string): Promise<CodeIntelProvider> {
   const want = loadConfig(root).codeIntel
   const preferred = BACKENDS[want] ?? codegraph

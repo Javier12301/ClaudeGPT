@@ -44,8 +44,8 @@ convirtió en una entrevista y hay que cortar.
 - **La recomendada va primera**, marcada como tal, con el motivo en una línea.
 - **Una decisión con impacto real por pregunta.** Si la respuesta no cambia lo que
   vas a construir, no es una pregunta: es relleno.
-- **Nunca preguntes lo que podés averiguar.** Si está en el repo, en Engram, en la
-  config, en los tests o en Context7, buscalo. Preguntar algo que estaba a un
+- **Nunca preguntes lo que podés averiguar.** Si está en el repo, su estado
+  durable, la config, los tests o Context7, buscalo. Preguntar algo que estaba a un
   `grep` de distancia quema la confianza del usuario en tus preguntas.
 - Ofrecé un default sensato y seguí. Si podés decidirlo vos con criterio, decidilo
   y decí que lo decidiste.
@@ -252,9 +252,9 @@ descubrís editando código sin haber anunciado esto, volvé atrás.
 
 Antes de pasar a Plan Mode:
 
-- `mem_save` de lo que va a servir en la próxima sesión: decisiones tomadas,
-  alternativas descartadas **con su motivo**, restricciones que descubrió el
-  usuario. No guardes la conversación entera.
+- Registrá para la próxima sesión las decisiones tomadas, alternativas
+  descartadas **con su motivo** y restricciones descubiertas en el documento
+  durable que corresponda. No guardes la conversación entera.
 - Si apareció una **regla de negocio** o una **decisión con trade-offs**, eso no es
   memoria operativa: va a documentación. Invocá `documentacion` durante el doc sync
   posterior, no ahora.

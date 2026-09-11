@@ -1,4 +1,4 @@
-// `orq hook <nombre>`: los hooks de Claude Code (y el git-guard de Codex).
+// `orq hook <nombre>`: hooks compartidos por Claude Code y Codex.
 //
 // Contrato comun: leen el evento por stdin, nunca bloquean el trabajo por un
 // fallo propio (ante cualquier error: salida vacia, exit 0), y escriben en
