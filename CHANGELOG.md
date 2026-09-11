@@ -9,6 +9,159 @@ correspondiente de [`docs/SYSTEM.md`](docs/SYSTEM.md) en el mismo diff.
 
 ### Added
 
+- README: prompt para que un agente instale o actualice el orquestador paso a
+  paso en una máquina nueva.
+
+### Fixed
+
+- Windows: `orq init` no encontraba `npm` y no instalaba codegraph. El
+  `npm.cmd` del instalador de Node no usa el formato cmd-shim; `parseNpmShim`
+  ahora reconoce los dos.
+
+### Removed
+
+- Serena: backend `serena` de `CodeIntelProvider`, chequeo "code intel duplicado"
+  de `orq doctor` y `.serena/` del repo. codegraph es el único motor (D-032).
+
+## [2.0.0-rc.1] - 2026-09-10
+
+Orquestador V2: runtime portable en Node/TypeScript (`orq`), sin dependencias
+de runtime. Reemplaza al kit PowerShell. Ver docs/DECISIONS.md D-020 a D-031.
+
+### Added
+
+- **`orq`**, un solo CLI: `init`, `doctor`, `uninstall`, `migrate`, `budget`,
+  `run`, `jobs`, `session`, `checkpoint`, `plan`, `worktree`, `codeintel`,
+  `metrics`, `statusline` y `hook`. Windows, Linux, macOS y WSL con la misma
+  logica; Node >= 22.16; cero dependencias de runtime.
+- **Instalacion determinista** (`orq init`): idempotente (la segunda corrida no
+  toca el disco), `--dry-run`, `--offline`, respaldo antes de cada escritura con
+  retencion de 5, manifiesto de todo lo instalado. `orq uninstall` es su
+  inversa exacta; `orq migrate` retira el V1 con respaldo. Registra los MCPs de
+  verdad (`claude mcp add` / `codex mcp add`) en vez de listarlos como pendientes.
+- **`orq doctor`**: runtime, git, Claude, Codex y su auth, hooks (y duplicados),
+  hooks V1 remanentes, statusline, permisos peligrosos, cuota, archivos del kit,
+  git-guard de Codex, `codex doctor`, code intel e indice.
+- **Gate de presupuesto automatico** (hook `SessionStart`): el estado queda en el
+  contexto sin que nadie lo pida (P1 de la retro: el gate opt-in nunca corria).
+- **Cuota de Claude desde el stdin documentado de la statusLine** (`rate_limits`):
+  `orq statusline` la persiste; reemplaza al cache de ClaudeCodeStatusLine.
+- **Telemetria de utilidad**: filas por sesion, subagentes medidos por
+  `SubagentStart`/`SubagentStop`, suites capturadas tambien desde la tool
+  `PowerShell`, `delegation_decision` (delegated | not_delegated) con motivo de
+  set cerrado, veredicto de findings (`--finding accepted|rejected`), checkpoints.
+  El informe dice explicitamente cuando el log no registro la sesion.
+- **Topologias** DIRECT / DELEGATED / ASYNC_REVIEW / PARALLEL. ASYNC_REVIEW con
+  `orq run --background` y tope duro de 1 reviewer activo por tarea (exit 7).
+  PARALLEL con `orq worktree` (sin merge automatico; no borra trabajo sin integrar).
+- **Checkpoints**: `fast` (checks declarados en `orq.config.json`, corta en la
+  primera falla) y `deep` (fast + review adversarial, bloqueante o no).
+- **Planes con dependencias** `hard` / `soft` / `independent` (`orq plan check`).
+- **Code intelligence detras de `CodeIntelProvider`**: codegraph (pinneado, en un
+  prefijo propio), serena (solo MCP) y native (git). Fallback automatico a native.
+- **Review adversarial**: el contrato del reviewer es "demostra que esto puede
+  estar roto aunque los tests pasen"; los findings exigen `evidence`.
+- Base de la skill de Codex como razonador (`kit/codex/skills/orquestador`).
+- 103 tests con `node:test` y un Codex falso: sin gastar cuota.
+
+### Changed
+
+- El git-guard cubre la tool `PowerShell` de Claude Code (en el V1 solo `Bash`:
+  un push por PowerShell no pasaba por ninguna capa de Claude). Deny rules en
+  las dos tools.
+- La skill del orquestador: 395 -> 265 lineas de preambulo permanente. Default
+  NO DELEGATION con seis motivos nombrados; escritor por region de archivos (no
+  por repo); fase obligatoria de ejercitar la app real antes de revisar el diff;
+  politica P0-P3.
+- Los roles Codex ya no fijan slugs de modelo (`gpt-5.6-*` ya estaba viejo: el
+  catalogo vivo rankea `gpt-6-astra` primero); el tier se resuelve siempre en vivo.
+- Engram pasa a compatibilidad: ningun modulo del runtime lo usa; los prompts lo
+  consultan solo si esta disponible.
+
+### Removed
+
+- Kit PowerShell (`codex-run.ps1`, `orq-metrics.ps1`, `git-guard.ps1`,
+  `statusline-wrapper.ps1`, instaladores y `verify.ps1`): movidos a `legacy/`.
+- Dependencia de `daniel3303/ClaudeCodeStatusLine`.
+- Rutas G y H y las skills `$constructor` / `$revisor-completo` de Codex
+  (sub-orquestadores con fan-out por defecto).
+- Roles Codex `explorador`, `e2e-browser` y `browser-diagnostics`.
+- El instalador ya no siembra `defaultMode: bypassPermissions` ni impone
+  `model`, `approval_policy` o `sandbox_mode` globales en `~/.codex/config.toml`.
+
+### Fixed
+
+- Informe de cierre que mezclaba sesiones, media subagentes en background en 0 s
+  y no veia suites corridas por PowerShell (P0 de la retro).
+- Procesos `codex app-server` huerfanos en Windows tras leer la cuota (se mata el
+  arbol, no solo el launcher de Node).
+- Estado de `.orquestador/` que ensuciaba `git status` de cualquier repo: ahora
+  solo se escribe dentro de un repo git y el directorio se auto-ignora.
+
+### Security
+
+Hallazgos del review adversarial de Codex sobre este mismo runtime (ASYNC_REVIEW
+real: 8 findings, 7 aceptados, 1 rechazado por diseño). Cada uno tiene su test
+con la reproducción del reviewer.
+
+- **git-guard**: la regex dejaba pasar `git --no-pager push`, `git -c k="A B" push`
+  y `-C` con rutas con espacios (en argv). Reemplazada por un parser
+  (`src/core/guard.ts`) que busca `git` en posición de comando, saltea opciones
+  globales y recorre `bash -c`, `pwsh -Command`, `cmd /c`, `iex`, `$(…)` y
+  backticks. De paso deja de bloquear texto inerte (`echo git push`).
+- **ASYNC_REVIEW**: la admisión era check-then-create (8 lanzamientos simultáneos
+  admitían 3). Ahora es atómica bajo un lock por tarea; escritura JSON con
+  reintento ante `EPERM`/`EBUSY` de Windows.
+- **uninstall** borraba archivos del usuario que init había reemplazado: ahora
+  init preserva los originales (fuera de la rotación de backups) y uninstall los
+  restaura. Solo se quitan los permisos que init agregó.
+- **migrate** borraba el V1 antes de validar: ahora corre el preflight de init
+  primero y restaura el V1 si init falla.
+- **merge**: un hook del usuario en el mismo grupo que uno nuestro se perdía.
+- Un payload de Codex estructuralmente inválido (p. ej. `{}` de un reviewer)
+  crasheaba el render: ahora se valida contra el schema del rol (exit 4).
+- Heartbeat y log vivo por corrida: dos corridas simultáneas ya no se pisan.
+
+Segunda ronda del review (8 findings, 8 aceptados):
+
+- **git-guard**: 13 formas más (agrupaciones `( )`/`{ }`, `if`/`while`, wrappers
+  `sudo`/`env`/`nohup`/`Start-Process`, escapes `g\it`, ejecutables indirectos
+  `$g`, `${GIT}`, `$(which git)`). Total: 44 bloqueadas, 12 inertes que pasan.
+- **Lock de tarea con dueño**: un lock viejo solo se recupera si su proceso murió
+  (a uno vivo y lento no se le roba), y solo lo suelta quien lo tomó.
+- **Jobs en background**: el launcher ya no pisa con `running` un job que el hijo
+  ya había cerrado.
+- **init parcial** (`--claude-only` o sin sesión de Codex): conserva la propiedad
+  de los archivos del kit Codex, así uninstall los sigue limpiando y restaurando.
+- **Originales fuera del home** (`CLAUDE_CONFIG_DIR` externo): se guardan bajo un
+  hash de la ruta; dos `SKILL.md` ya no comparten copia.
+- **init que tira una excepción** deja un manifiesto parcial; migrate restaura el V1.
+- **uninstall** conserva `includeCoAuthoredBy`/`attribution` si el usuario los
+  cambió después de instalar.
+- **Heartbeat** renovado por tiempo: un razonamiento largo sin eventos ya no
+  desaparece de la statusline.
+
+Review final (8 findings, 8 aceptados):
+
+- **git-guard**: `cmd /c g^it push` y `eval git push` (verificados ejecutando git).
+- **ASYNC_REVIEW**: un `maxConcurrent` inválido (`"abc"`, `0`) anulaba el tope;
+  ahora cae a 1.
+- **Plan**: una dependencia `hard` exige además el checkpoint aprobado
+  (`orq checkpoint fast|deep --phase <id>` lo registra en `plan.json`).
+- **Telemetría**: una corrida de tests sin éxito comprobable es `UNKNOWN`, nunca
+  GREEN; decisiones de delegar y corridas de subagentes se informan por separado.
+- **Manifiesto**: uno de una versión anterior se normaliza en vez de romper init;
+  los archivos retirados del kit se quitan al reinstalar.
+- **uninstall** borra `settings.json`/`hooks.json` que creó init y quedaron vacíos.
+- **init** sin cambios ya no reescribe el manifiesto (conserva `installedAt`).
+- **Informe**: un rol `constructor` se imprimía como `function Object()…1` (contador
+  sobre `{}`); los contadores usan objetos sin prototipo. Encontrado leyendo el
+  informe real, no por tests ni review.
+
+## [1.x] - kit PowerShell (sin version publicada)
+
+### Added
+
 - **Observabilidad del lado Claude** (`Orquestador/hooks/orq-metrics.ps1`). Los
   spawns de subagentes y las corridas de tests entran al mismo
   `.orquestador/decisions.jsonl` que ya escribe el wrapper, distinguidos por el

@@ -1,8 +1,7 @@
-# Sistema — Orquestador Híbrido Claude + Codex
+# Sistema — Orquestador V2 (Claude Code + Codex)
 
 Estado actual del sistema. El porqué de cada decisión vive en
-[`DECISIONS.md`](DECISIONS.md); lo que falta o está en curso, en
-[`ROADMAP.md`](ROADMAP.md).
+[`DECISIONS.md`](DECISIONS.md); lo que falta, en [`ROADMAP.md`](ROADMAP.md).
 
 Índice: [1. Contexto](#1-contexto) · [2. Reglas de negocio](#2-reglas-de-negocio)
 · [3. Arquitectura](#3-arquitectura) · [4. Flujos críticos](#4-flujos-críticos)
@@ -13,895 +12,472 @@ Estado actual del sistema. El porqué de cada decisión vive en
 
 ## 1. Contexto
 
-El kit orquesta dos entornos multiagente bajo un solo Tech Lead: Claude Opus
-habla con el usuario, decide, delega y arbitra; Codex CLI aporta capacidad de
-ejecución delegada vía `Orquestador/scripts/codex-run.ps1`.
+Un **razonador principal por tarea** — Claude o Codex, según desde dónde se
+trabaje — entiende el objetivo, planifica, decide qué delegar y arbitra. La
+delegación es la excepción y tiene que nombrar su motivo. El runtime `orq`
+(Node/TypeScript, sin dependencias de runtime) aporta lo mecánico: instalación,
+proveedores, cuota, contratos, jobs, worktrees, checkpoints y telemetría. La
+política vive en la skill.
 
 **Actores:**
 
 - **Usuario** — única fuente de pedidos y de aprobación para publicar cambios.
-- **Claude Opus (`/orquestador`)** — Tech Lead. Única interfaz con el usuario.
-- **Subagentes Claude (Sonnet)** — `explorador`, `tester`, `constructor`.
-- **Roles Codex** — `constructor`, `reviewer`, `security-reviewer`, `verifier`,
-  `docs-researcher`, invocados vía `codex-run.ps1 -Role <rol>`.
+- **Razonador** — la sesión principal (Claude Code con la skill `orquestador`, o
+  Codex con su skill `orquestador`). Única interfaz con el usuario.
+- **Subagentes Claude** — `explorador`, `tester`, `constructor` (Sonnet/Haiku).
+- **Roles Codex** — `constructor`, `tester-tdd`, `verifier`, `reviewer`,
+  `security-reviewer`, `docs-researcher`, vía `orq run --role <rol>`.
 
 **Glosario:**
 
-- **Ruta A–H** — el caso de routing que decide el orquestador para un pedido
-  (ver § 3, tabla de casos).
-- **Tier** — nivel de capacidad de modelo Codex (`lead`, `worker`, `cheap`),
-  resuelto contra el catálogo vivo de modelos.
-- **Rollout** — el archivo `.jsonl` donde Codex persiste una sesión; su tamaño
-  en KB es el proxy que decide si una sesión se reusa.
-- **Veredicto de presupuesto** — la decisión `GO` / `GO acotado` / `WARN` /
-  `NO-GO` que produce el gate de cuotas antes de delegar a Codex.
-- **Doc sync** — la actualización de `docs/SYSTEM.md`, `docs/DECISIONS.md`,
-  `docs/ROADMAP.md` y `CHANGELOG.md` en el mismo diff que el cambio que documentan.
+- **Topología** — DIRECT, DELEGATED, ASYNC_REVIEW o PARALLEL (§ 3).
+- **Motivo de delegación** — uno de seis: `parallelism`, `isolation`,
+  `independence`, `volume`, `specialization`, `broad_exploration`.
+- **Tier** — nivel de modelo Codex (`lead`, `worker`, `cheap`), resuelto contra
+  el catálogo vivo.
+- **Rollout** — el `.jsonl` donde Codex persiste una sesión; su tamaño decide si
+  se reusa.
+- **Veredicto / estado** — las dos capas del gate de presupuesto (§ 2).
+- **Checkpoint** — FAST (determinista) o DEEP (FAST + review adversarial).
 
 ---
 
 ## 2. Reglas de negocio
 
-### Presupuesto y routing
+### Presupuesto
 
 #### BR-001 — NO-GO por cuota agotada o por Codex ausente
 
-Codex con menos de 10% libre, o con `spendControlReached`, produce veredicto
-NO-GO. **Codex no instalado en la máquina produce el mismo NO-GO**, con una razón
-propia que lo distingue del WARN de "`app-server` no responde": no es lo mismo que
-Codex no conteste a que Codex no exista. La rama se evalúa antes de leer cuota
-alguna, y el kit sigue funcionando en modo Claude-solo — el gate nunca bloquea.
+Codex con menos de 10% libre, con `spendControlReached`/`rateLimitReachedType`, o
+ausente del PATH, produce NO-GO. "Codex ausente" tiene razón propia, distinta del
+WARN de "`app-server` no responde". El gate nunca bloquea al razonador.
 
 Estado: Activa
-Test: `Orquestador/tests/test-codex-run.ps1` — checks de degradación sin codex
-Código: `Orquestador/scripts/codex-run.ps1` — `$MinFreePercent`, `Get-CodexCommand`, `Get-CodexVerdict`
+Test: `test/quota.test.ts`, `test/run.test.ts` — "sin codex instalado"
+Código: `src/core/quota.ts` — `codexVerdict`
 
 #### BR-002 — Umbrales de veredicto
 
-Entre 10% y 20% libre el veredicto es WARN; entre 20% y 40%, GO acotado (sin
-implementación voluminosa); a partir de 40%, GO.
+| Codex libre | Veredicto |
+|---|---|
+| ≥ 40% | GO — delegación normal, incluso implementación grande |
+| 20–40% | GO acotado — review/verify/docs sí, implementación voluminosa no |
+| 10–20% | WARN — solo si el usuario lo pide |
+| < 10% | NO-GO |
 
 Estado: Activa
-Test: —
-Código: `Orquestador/scripts/codex-run.ps1` — `$CODEX_WARN_FREE`, `$CODEX_HEAVY_FREE`
-
-| Codex libre | Decisión |
-|---|---|
-| > 40% | GO — delegación normal, incluso implementación grande |
-| 20–40% | GO acotado — review/verify/docs sí, implementación voluminosa no |
-| 10–20% | WARN — solo si se pide explícitamente |
-| < 10% | **NO-GO** — Codex descartado, Claude-only |
-| `spendControlReached` | **NO-GO** duro |
-| `codex` ausente del PATH | **NO-GO** duro — kit en modo Claude-solo |
+Test: `test/quota.test.ts` — bordes exactos (mover un umbral lo pone en RED)
+Código: `src/core/quota.ts` — `CODEX_MIN_FREE`, `CODEX_WARN_FREE`, `CODEX_HEAVY_FREE`
 
 #### BR-003 — Estado de capacidad
 
-El routing se resuelve en **dos capas independientes que se componen**. El
-veredicto (BR-001, BR-002) responde *"¿se puede usar Codex, y para qué?"*; el
-estado responde *"¿quién lleva el lead y quién ejecuta?"*.
-
-El nivel de presión de Claude sale de sus dos ventanas:
-
-| Claude 5h usado | Nivel |
-|---|---|
-| < 50% | `fresco` |
-| 50–70% | `presionado` |
-| 70–85% | `apretado` |
-| ≥ 85% | `crítico` |
-
-Una ventana de 7 días por encima del 80% sube el piso a `presionado` aunque la
-de 5h esté fresca. El gate sube el nivel, nunca lo baja.
-
-El estado sale de evaluar estas reglas **de arriba hacia abajo; la primera que
-coincide gana**:
+Nivel de Claude por su ventana de 5h: `< 50` fresco · `50–70` presionado ·
+`70–85` apretado · `≥ 85` crítico. La ventana de 7 días por encima de 80 sube el
+piso a presionado; nunca lo baja. Reglas en orden, la primera gana:
 
 | # | Condición | Estado |
 |---|---|---|
 | 1 | Claude sin dato legible | `BALANCED` |
-| 2 | `crítico` y Codex NO-GO o WARN | `SURVIVAL` |
+| 2 | crítico y Codex NO-GO o WARN | `SURVIVAL` |
 | 3 | Codex NO-GO | `CLAUDE-LEAD` |
-| 4 | `crítico` y Codex GO | `SONNET-LEAD` |
-| 5 | `apretado` y Codex GO | `SONNET-LEAD` |
-| 6 | `presionado` y Codex GO | `CODEX-PREFERRED` |
+| 4–5 | crítico o apretado, y Codex GO | `SONNET-LEAD` |
+| 6 | presionado y Codex GO | `CODEX-PREFERRED` |
 | 7 | Codex WARN | `CLAUDE-LEAD` |
 | 8 | resto | `BALANCED` |
 
-Las reglas 4–6 exigen veredicto `GO`: un `WARN` no alcanza para poner a Codex a
-ejecutar por más apretado que esté Claude, y cae a la regla 7.
-
-En `CODEX-PREFERRED` y `SONNET-LEAD`, un veredicto `GO` acotado sigue vetando la
-implementación voluminosa: el estado decide quién ejecuta, el veredicto cuánto.
+En `CODEX-PREFERRED` y `SONNET-LEAD`, un GO acotado sigue vetando el volumen: el
+estado decide quién ejecuta, el veredicto cuánto.
 
 Estado: Activa
-Test: `Orquestador/tests/test-codex-run.ps1` — 26 checks
-Código: `Orquestador/scripts/codex-run.ps1` — `Get-ClaudeLevel`, `Add-CapacityState`
-
-**La regla 1 se evalúa primera a propósito.** Sin lectura de la cuota de Claude
-no se infiere ningún estado, ni siquiera con Codex en NO-GO, y el gate degrada al
-comportamiento previo con un aviso. Un cache ausente y uno corrupto se tratan
-igual. **El gate nunca bloquea al orquestador por no poder leer una cuota.**
-
-Consultable a mano en cualquier momento:
-
-```powershell
-powershell -File ~/.claude/scripts/codex-run.ps1 -BudgetOnly
-```
-
-```
-== Presupuesto ==
-Codex  : 80% libre (plan plus) - reset 2026-08-21 09:52
-Claude : 5h 58% usado | 7d 25% usado - reset 2026-08-21T05:40:00Z
-Estado : CODEX-PREFERRED - Claude planifica y arbitra; ejecucion a Codex.
-Decision: GO - Codex libre 80%. Delegacion normal.
-```
+Test: `test/quota.test.ts` — 8 reglas, 4 pares de precedencia, bordes de nivel, gate 7d
+Código: `src/core/quota.ts` — `claudeLevel`, `capacityState`
 
 #### BR-007 — Timeout de la consulta de cuota
 
-La consulta de cuota expira a los 15 segundos.
+La consulta por JSON-RPC expira a los 15 s (5 s en el hook de inicio de sesión).
+Sin respuesta, el veredicto es WARN.
 
 Estado: Activa
-Test: —
-Código: `Orquestador/scripts/codex-run.ps1` — `$RPC_TIMEOUT_MS`, `Get-CodexQuota`
+Código: `src/providers/codex.ts` — `RPC_TIMEOUT_MS`, `fetchCodexQuota`
+
+#### BR-016 — El gate corre solo al iniciar la sesión
+
+El hook `SessionStart` calcula veredicto y estado, los registra (`event: gate`)
+y los deja en el contexto en dos líneas. El razonador no decide si consultarlo.
+
+Estado: Activa
+Test: `test/telemetry.test.ts` — "el gate que no corrio se ve en el reporte"
+Código: `src/commands/hook.ts` — `sessionStartContext`
+
+### Delegación y topologías
+
+#### BR-017 — Default NO DELEGATION, con motivo nombrado
+
+Toda delegación a Codex exige `--reason` de un set cerrado de seis motivos; sin
+motivo, `orq run` sale con uso inválido (exit 6). Las decisiones de no delegar se
+registran con `orq metrics --decision not_delegated --reason <motivo>`
+(`already_had_context`, `too_small`, `coupled`, `spec_cost_exceeds_work`,
+`provider_unavailable`, `user_override`). Un NO-GO o una falta de auth se
+registran solos como `provider_unavailable`.
+
+Estado: Activa
+Test: `test/run.test.ts` — "sin --reason no se delega", "NO-GO por cuota"
+Código: `src/commands/run.ts`, `src/core/telemetry.ts` — `DELEGATED`, `NOT_DELEGATED`
+
+#### BR-018 — ASYNC_REVIEW: un reviewer activo por tarea
+
+`orq run --background` solo acepta roles read-only y exige `--task`. Un segundo
+reviewer activo sobre la misma tarea se rechaza (exit 7) nombrando el job en
+curso. Un job cuyo proceso murió no bloquea. El tope sube solo con
+`asyncReview.maxConcurrent` explícito en `orq.config.json`. La admisión es
+atómica: chequeo del tope, alta del job y publicación del PID van bajo un lock
+exclusivo por tarea (`mkdir`) con dueño: un lock viejo se recupera solo si el
+proceso que lo tomó murió, y solo lo suelta quien lo tomó. El launcher relee el
+job antes de publicar el PID para no pisar un estado final que el hijo ya escribió.
+
+Estado: Activa
+Test: `test/run.test.ts` — "ASYNC_REVIEW: el segundo reviewer ... se RECHAZA",
+"8 lanzamientos simultáneos … exactamente 1 admitido"
+Código: `src/commands/run.ts` — `launchBackground`; `src/core/jobs.ts`
+
+#### BR-019 — Un escritor por región de archivos
+
+Dos unidades sin archivos en común pueden escribir en paralelo. Si las dos
+escriben en el mismo repo, la segunda va en un worktree (`orq worktree add`).
+Nunca merge automático; `remove` se niega con cambios sin commitear y conserva
+la branch si no está integrada.
+
+Estado: Activa (la región es criterio del razonador; el aislamiento, código)
+Test: `test/runtime.test.ts` — "worktree: crear, detectar existente, negarse a borrar…"
+Código: `src/commands/worktree.ts`
+
+### Contratos de salida
+
+Codex no devuelve el código que escribió en disco. El contrato lo fuerza un JSON
+Schema (`--output-schema`), no el prompt:
+
+```json
+{"files_changed":[], "summary":"", "tests":{"command":"","status":"GREEN|RED|NOT_RUN"},
+ "risks":[], "blocked":false, "status":"DONE|NEEDS_INFO|BLOCKED",
+ "clarifications":[{"missing_fact":"","evidence_checked":[],"question":"","affected_decision":""}]}
+```
+
+Review:
+
+```json
+{"findings":[{"severity":"P0|P1|P2|P3","file":"","line":0,"problem":"","impact":"",
+              "evidence":"","suggested_fix":""}], "coverage_note":""}
+```
+
+#### BR-006 — Truncado de salida sin JSON válido
+
+Sin JSON válido, se muestran 20 líneas y la ruta del resto (exit 4).
+
+Estado: Activa
+Test: `test/run.test.ts` — "JSON corrupto"
+Código: `src/providers/codex.ts` — `MAX_RAW_LINES`
+
+#### BR-011 — Estados de resultado estructurados
+
+`DONE` y `NEEDS_INFO` van con `blocked=false`; `BLOCKED` con `blocked=true`.
+`DONE` exige `clarifications` vacío; `NEEDS_INFO`, al menos una. Todo payload se
+valida además estructuralmente contra el schema de su rol. Un payload que no
+cumple es contrato violado (exit 4), nunca un crash. Un exit ≠ 0 de `codex exec` es fallo aunque
+haya JSON en `-o`. `--resume` exige `--role`.
+
+Estado: Activa
+Test: `test/runtime.test.ts` — invariante; `test/run.test.ts` — contrato violado, exit ≠ 0
+Código: `src/core/contracts.ts` — `validate`, `statusInvariant`
+
+#### BR-012 — Verify-before-infer para Codex
+
+Codex no infiere un hecho crítico del repo (motor de BD, framework, runner,
+contrato, infra…): lo verifica; si quedan interpretaciones válidas, `NEEDS_INFO`;
+si el repo contradice la spec, reporta el conflicto.
+
+Estado: Activa
+Código: `src/core/contracts.ts` — `workerPrompt`; `kit/codex/AGENTS.md`
+
+#### BR-013 — Tope de aclaraciones
+
+Máximo 2 ciclos de `NEEDS_INFO` por tarea. No consume retry: se registra con
+`--clarify-of`, no con `--retry-of`.
+
+Estado: Activa (criterio del razonador)
+Código: `kit/claude/skills/orquestador/SKILL.md`
+
+#### BR-014 — Los subagentes Claude frenan antes de escribir
+
+`tester` y `constructor` devuelven `NEEDS_INFO` sin escribir ante una
+ambigüedad que cambie el diseño; el razonador responde por `SendMessage` al
+mismo subagente con solo el delta.
+
+Estado: Activa (criterio de prompt)
+Código: `kit/claude/agents/*.md`
+
+#### BR-015 — El test tiene que recorrer el camino real
+
+Al menos un test por cambio de comportamiento ejercita el componente como lo
+invoca la aplicación. Una aserción de ausencia lleva su contraejemplo.
+
+Estado: Activa (criterio de prompt)
+Código: `kit/claude/agents/tester.md`; `SKILL.md` — TDD por riesgo
 
 #### BR-008 — El retry lógico es el único que cuenta
 
-Dos RED lógicos consecutivos del mismo executor sobre la misma unidad agotan los
-intentos: no hay un tercero, se vuelve al contrato o a la spec.
+Dos RED lógicos seguidos del mismo executor sobre la misma unidad agotan los
+intentos. `NOT_RUN`, `blocked`, exit ≠ 0 y salida sin JSON no consumen intentos.
 
-Un RED lógico es código que corrió y dio un resultado incorrecto
-(`tests.status: "RED"`). Las fallas de infraestructura, sandbox, red, tooling y
-las salidas sin JSON válido llegan como `NOT_RUN`, `blocked: true` o exit code
-distinto de 0, y **no consumen intentos**. Solo los lógicos se registran en
-`retry_of`.
+Estado: Activa (criterio del razonador)
+
+#### BR-020 — Findings arbitrados con evidencia
+
+Cada finding trae `evidence`. El razonador lo verifica en el código y registra
+el veredicto (`orq metrics --finding accepted|rejected`). P0/P1 interrumpen; P2
+va a cola; P3 es informativo. El reviewer nunca aplica sus findings.
 
 Estado: Activa
-Test: —
-Código: `Orquestador/skills/orquestador/SKILL.md` (criterio del orquestador)
+Test: `test/run.test.ts` — "review: findings con evidencia"
+Código: `src/core/contracts.ts` — `SCHEMAS.review`, `SEVERITY_ACTION`
+
+### Reutilización de sesiones
+
+Se reusa (`--resume`) con continuidad real, sesión liviana y corrida anterior
+sana. Un reviewer nunca hereda la sesión del constructor.
+
+#### BR-004 / BR-005 — Umbrales de reuso
+
+`< 400 KB` REUSE-OK · `400 KB – 1.2 MB` REUSE-IF-DIRECT · `> 1.2 MB` REUSE-DENIED
+(exit 3). Consultable con `orq session <id>`.
+
+Estado: Activa
+Test: `test/runtime.test.ts` — "sessionDetail: umbrales"
+Código: `src/providers/codex.ts` — `REUSE_FREE_KB`, `REUSE_LIMIT_KB`
+
+### Señal de vida
+
+#### BR-009 — El heartbeat existe solo durante la corrida
+
+`~/.orquestador/activity/<pid>.json` — uno por corrida — se crea al empezar y se
+borra al terminar, en todos los caminos. Una corrida no puede pisar ni borrar la
+señal de otra (ASYNC_REVIEW + DELEGATED a la vez). La statusline lo muestra si tiene menos de 90 s.
+
+Estado: Activa
+Test: `test/run.test.ts` — "BR-009"
+Código: `src/providers/codex.ts` — `heartbeat`
+
+#### BR-010 — Sin deadlock de pipes
+
+stdin se escribe mientras stdout ya se drena (streams de Node).
+
+Estado: Activa
+Test: `test/proc.test.ts` — 500 KB de stdin contra un hijo que emite 2000 líneas antes de leer
+Código: `src/core/proc.ts` — `run`
+
+### Checkpoints y planes
+
+#### BR-021 — FAST checkpoint determinista y bloqueante
+
+`orq checkpoint fast` corre los checks declarados en `orq.config.json` en orden
+`format → lint → typecheck → test → build`, cortando en la primera falla. Sin
+checks declarados no adivina: sugiere desde `package.json` y sale con 6. DEEP
+agrega un review adversarial (background salvo `--blocking`).
+
+Estado: Activa
+Test: `test/runtime.test.ts` — "checkpoint fast"
+Código: `src/commands/checkpoint.ts`
+
+#### BR-022 — Dependencias entre fases
+
+`.orquestador/plan.json`: `hard` bloquea hasta que la dependencia esté `done` y, si declara checkpoint, tenga `checkpoint_passed: true` (lo actualiza `orq checkpoint fast|deep --phase <id>`);
+`soft` permite preparar/investigar pero no aplicar cambios definitivos;
+`independent` no ordena. `orq plan check` detecta ciclos, dependencias
+inexistentes y tipos inválidos.
+
+Estado: Activa
+Test: `test/runtime.test.ts` — "plan"
+Código: `src/commands/checkpoint.ts` — `analyzePlan`
 
 ### Overrides del usuario
 
 | Le decís | Qué pasa |
 |---|---|
-| *"hacelo solo con Claude"* | Codex no se usa. Ni siquiera consulta cuota |
-| *"usá también Codex"* | Al menos una delegación con utilidad real (no ritual) |
-| *"que Codex implemente"* | Claude sigue liderando; Codex ejecuta |
+| *"hacelo solo con Claude"* | Codex no se usa (`user_override`) |
+| *"usá también Codex"* | Al menos una delegación con utilidad real |
+| *"que Codex implemente"* | El razonador sigue liderando; Codex ejecuta |
 | *"que Codex revise"* | Codex read-only como reviewer |
-| nada | Claude decide según costo, complejidad, riesgo y beneficio |
 
 ### Qué se le pasa a Codex y qué no
 
-**Sí:** objetivo y contrato, paths relevantes (rutas, no contenido), tests
-relevantes (ruta + comando), restricciones, qué no hacer.
-
-**No:** historial del chat, archivos completos, razonamientos de Claude, logs
-largos, salidas de test irrelevantes.
-
-### Contratos de salida
-
-Codex no devuelve el código que ya escribió en disco. El contrato lo fuerza un
-JSON Schema pasado con `--output-schema`, no la buena voluntad del prompt:
-
-```json
-{"files_changed":[...],"summary":"...",
- "tests":{"command":"...","status":"GREEN|RED|NOT_RUN"},
- "risks":[...],"blocked":false,
- "status":"DONE|NEEDS_INFO|BLOCKED",
- "clarifications":[{"missing_fact":"...","evidence_checked":["..."],
-                   "question":"...","affected_decision":"..."}]}
-```
-
-Para review:
-
-```json
-{"findings":[{"severity":"P1","file":"a.ts","line":42,
-              "problem":"...","impact":"...","fix":"..."}],
- "coverage_note":"..."}
-```
-
-Cómo se mantiene compacto:
-
-1. `-o <archivo>` manda el mensaje final a disco; el wrapper imprime solo el JSON
-   parseado (10–20 líneas).
-2. `--json` va a un stream aparte, nunca al contexto de Claude.
-3. Claude nunca pide "mostrame el código": lee `git diff` local, gratis.
-4. Si no vuelve JSON válido, el wrapper trunca duro y te dice dónde está el resto.
-
-#### BR-006 — Truncado de salida sin JSON válido
-
-La salida sin JSON válido se trunca a 20 líneas.
-
-Estado: Activa
-Test: —
-Código: `Orquestador/scripts/codex-run.ps1` — `$MAX_OUTPUT_LINES`
-
-#### BR-011 — Estados de resultado estructurados
-
-El contrato `impl` lleva `status` (`DONE` | `NEEDS_INFO` | `BLOCKED`) además del
-booleano `blocked`, que se conserva. Invariante: `DONE` y `NEEDS_INFO` van con
-`blocked=false`; `BLOCKED` va con `blocked=true`. `DONE` exige `clarifications`
-vacío; `NEEDS_INFO` exige al menos una. `NEEDS_INFO` sale con exit code 0 y sigue
-siendo elegible para continuación directa de sesión. `BLOCKED` se reserva para un
-bloqueo real de ejecución o entorno, no para ambigüedad normal. Los contratos
-`review` y `docs` no cambian.
-
-El JSON Schema deja los tres campos independientes; la invariante que los liga la
-chequea el wrapper después de parsear (`Test-StatusInvariant`) y un payload que
-no la cumple se trata como contrato violado (exit 4), no como resultado sano. Un
-exit distinto de 0 de `codex exec` es fallo aunque haya quedado JSON en `-o`.
-`-Resume` exige `-Role` explícito: el schema y la variante del prompt dependen
-del rol de la sesión.
-
-Estado: Activa
-Test: `Orquestador/tests/test-codex-run.ps1` — `schema impl: required incluye
-status`; `Test-StatusInvariant: NEEDS_INFO sin clarifications viola`
-Código: `Orquestador/scripts/codex-run.ps1` — `New-SchemaFile`,
-`Test-StatusInvariant`, render de resultado, `Write-DecisionLog`
-
-#### BR-012 — Verify-before-infer para Codex
-
-Codex no inventa ni infiere un hecho crítico del repo (motor de BD, framework,
-librería, package manager, test runner, infra, contrato de API, target de
-deploy, decisión de arquitectura, comportamiento por versión). Inspecciona la
-evidencia del repo primero; si el hecho se determina localmente, sigue; si
-quedan interpretaciones válidas que cambian la implementación, devuelve
-`NEEDS_INFO`; si un hecho del repo contradice el spec, reporta el conflicto sin
-sobrescribir ninguna fuente.
-
-Estado: Activa
-Test: —
-Código: `codex/Orquestador/AGENTS.md`; `Orquestador/scripts/codex-run.ps1` —
-bloque de prompt inyectado; `codex/Orquestador/.codex/agents/*.toml`
-
-#### BR-013 — Tope de aclaraciones
-
-Máximo 2 ciclos de `NEEDS_INFO` por tarea/spec. Pasado el segundo sin resolver,
-el orquestador deja de reanudar en automático, revisa y enriquece el spec, y
-decide si abre una tarea Codex nueva o cierra por otra vía. `NEEDS_INFO` no es un
-RED lógico y no consume el presupuesto de retry: se registra con `-ClarifyOf`, no
-con `-RetryOf`. El tope es criterio del orquestador, no estado del wrapper.
-
-Estado: Activa
-Test: —
-Código: `Orquestador/skills/orquestador/SKILL.md`; `Orquestador/scripts/codex-run.ps1`
-— `-ClarifyOf`, `clarify_of` en `decisions.jsonl`
-
-#### BR-014 — Los subagentes Claude frenan antes de escribir
-
-`tester` y `constructor` tienen el mismo contrato de frenar que Codex: ante una
-ambigüedad que **cambie el diseño** —de dónde sale un dato, qué se persiste, qué
-contrato se toca, qué pasa en el camino de error, qué capa es responsable, una
-regla de dominio— devuelven `NEEDS_INFO` con `missing_fact`, `evidence_checked`,
-`question` y `affected_decision`, **sin escribir un solo archivo**, y agrupando
-todas las dudas en una sola devolución. Antes de frenar tienen que intentar
-verificar el hecho contra el repo. Las decisiones mecánicas —nombres internos,
-helpers, organización local— las toman solas y no se preguntan.
-
-El orquestador resuelve el hecho desde evidencia y responde con `SendMessage` al
-**mismo** subagente, solo con el delta: el contexto del subagente se conserva y
-no se reconstruye la spec. Aplica el mismo tope de BR-013: 2 ciclos por tarea, y
-no consume presupuesto de retry.
-
-`explorador` no frena —es de solo lectura— pero reporta las dos interpretaciones
-con su evidencia en vez de elegir una.
-
-Estado: Activa
-Test: —
-Código: `Orquestador/agents/tester.md`; `Orquestador/agents/constructor.md`;
-`Orquestador/agents/explorador.md`; `Orquestador/skills/orquestador/SKILL.md` — Fase 5
-
-#### BR-015 — El test tiene que recorrer el camino real
-
-Al menos un test por cambio de comportamiento ejercita el componente, endpoint o
-servicio **como lo invoca la aplicación**. Un test que construye a mano una
-entrada que la aplicación nunca genera no cuenta como cobertura de ese camino, y
-el `tester` tiene que decirlo. Toda aserción de que algo **no** aparece lleva un
-contraejemplo que verifica que **sí** aparece cuando corresponde — sin él, el
-test también pasa cuando la regla entera dejó de evaluarse.
-
-Estado: Activa
-Test: —
-Código: `Orquestador/agents/tester.md`; `Orquestador/skills/orquestador/SKILL.md` — Fase 4
-
-### Señal de vida durante la delegación
-
-El punto 2 de arriba —`--json` va a un stream aparte, nunca al contexto de
-Claude— es justamente lo que permite mirarlo sin pagar tokens. El wrapper vuelca
-ese stream a disco a medida que llega (`-LiveLog`) y publica un heartbeat que la
-statusline lee una vez por turno. Ver `D-015`.
-
-| Archivo | Qué es | Quién lo lee |
-|---|---|---|
-| `$env:TEMP\claude\codex-live.log` | el stream `--json` crudo, línea a línea | vos, con `Get-Content -Wait` |
-| `$env:TEMP\claude\codex-activity.json` | rol, fase, inicio, último evento, items | `statusline-wrapper.ps1` |
-
-#### BR-009 — El heartbeat existe solo durante la corrida
-
-El archivo de actividad se crea al empezar la delegación y se **borra** al
-terminar, en el mismo punto para todos los caminos de salida. Su presencia es lo
-que significa "corriendo": la statusline no distingue estados, solo lo muestra si
-está y tiene menos de 90 s.
-
-Estado: Activa
-Test: `Orquestador/tests/test-codex-run.ps1` — `Stop-CodexHeartbeat borra el archivo`
-Código: `Orquestador/scripts/codex-run.ps1` — `Start/Write/Stop-CodexHeartbeat`
-
-#### BR-010 — Con `-LiveLog`, el stdin se escribe asíncrono
-
-La rama que lee el stdout línea a línea **no puede** escribir el stdin de forma
-sincrónica: nadie estaría drenando el stdout, y si el hijo llena ese pipe
-mientras el padre llena el suyo, los dos quedan trabados. El deadlock es
-irrecuperable — ocurre dentro del `Write`, que no tiene timeout, así que el
-`TimeoutSec` del wrapper tampoco corta. La rama sin `-LiveLog` no lo sufre porque
-su `ReadToEndAsync()` ya está corriendo antes del write.
-
-Estado: Activa
-Test: `Orquestador/tests/test-codex-run.ps1` — 500 KB de stdin contra un hijo que
-emite 2000 líneas antes de leer
-Código: `Orquestador/scripts/codex-run.ps1` — `WriteAsync` + `Task::WaitAny`
-
-### Reutilización de sesiones
-
-**Se reusa** (`-Resume <SESSION_ID>`) cuando se cumplen las tres:
-
-1. **Continuidad real** — misma tarea, mismos archivos, misma spec.
-2. **Sesión liviana** — no superó el umbral.
-3. **La corrida anterior terminó sana** — exit 0 y `blocked: false`.
-
-**Se arranca de cero** si es otra tarea, cambió el contrato, cambia el rol,
-cambia el sandbox, o el working tree cambió por fuera de Codex.
-
-**Un reviewer nunca hereda la sesión del constructor.** Si el que revisa es el
-mismo que escribió, se pierde la independencia del review — que es medio
-motivo de usar Codex.
-
-#### BR-004 — Umbral de reuso directo
-
-Un rollout de menos de 400 KB es reusable (`REUSE-OK`).
-
-Estado: Activa
-Test: —
-Código: `Orquestador/scripts/codex-run.ps1` — `$REUSE_FREE_KB`, `Get-SessionDetail`
-
-#### BR-005 — Umbrales de reuso condicionado y denegado
-
-Entre 400 KB y 1.2 MB solo se reusa para continuación directa
-(`REUSE-IF-DIRECT`); por encima de 1.2 MB, sesión nueva (`REUSE-DENIED`).
-
-Estado: Activa
-Test: —
-Código: `Orquestador/scripts/codex-run.ps1` — `$REUSE_LIMIT_KB`, `Get-SessionDetail`
-
-El umbral sale del tamaño del rollout en
-`~/.codex/sessions/<año>/<mes>/<día>/rollout-<ts>-<SESSION_ID>.jsonl`. Los turnos
-no discriminan (van de 2 a 4 en todos los casos); los bytes sí:
-
-| Rollout | Decisión |
-|---|---|
-| < 400 KB | **Reusar** si hay continuidad |
-| 400 KB – 1.2 MB | Reusar **solo si es continuación directa** |
-| > 1.2 MB | **Sesión nueva** — el wrapper devuelve `REUSE-DENIED` |
-
-```powershell
-powershell -File ~/.claude/scripts/codex-run.ps1 -SessionInfo <id>
-```
-
-```
-== Sesion 01a021ee-2fa6-7691-ba9f-d85c626bb5ca ==
-Rollout  : 134 KB
-Turnos   : 1
-Veredicto: REUSE-OK  (libre <400KB, limite 1200KB)
-```
-
-`--ephemeral` no persiste el rollout y deja la sesión irrecuperable. Se usa solo
-para one-shots genuinos (un review puntual, una consulta documental).
-
-Un `NEEDS_INFO` sano (exit 0, `blocked=false`) cuenta como corrida terminada sana
-para el reuso: la continuación directa se decide por el tamaño del rollout, igual
-que un `DONE`.
-
-### Disciplina del orquestador
-
-Reglas de criterio, no verificables contra código — sin ID:
-
-- La primera decisión ante cada tarea es `DIRECT` / `DELEGATE` / `PARALLELIZE`,
-  y `DIRECT` es el default: delegar es la excepción que hay que justificar.
-- La implementación se delega cuando el cambio toca **más de tres archivos** o
-  necesita código que el orquestador no tiene en contexto. El tamaño del diff no
-  es criterio; el costo del ciclo completo sí.
-- Los tests nuevos se crean por riesgo, no por ritual: presentacional y mecánico
-  no lleva test nuevo, comportamiento acotado lleva un RED escrito por el
-  orquestador, y el pipeline con tester independiente queda para regla de
-  negocio, cálculo, persistencia, validación, permisos, estados y contratos.
-- Reusar antes que crear, también en tests: si ya existe un test que cubre el
-  comportamiento y la regla cambió, se ajusta ese test en vez de escribir uno
-  nuevo al lado.
-- La verificación es por alcance antes que por tipo: test afectado → módulo →
-  repo, y suite completa solo en cierre de fase, cambio transversal o entrega.
-- La baseline de la suite se mide en la sesión, nunca se cita de un handoff, un
-  README, un CHANGELOG ni una memoria.
-- Los fixes sobre trabajo delegado los aplica el orquestador. Si hace falta más
-  contexto, se continúa el subagente original con `SendMessage` o la sesión de
-  Codex con `-Resume`; un executor nuevo y frío es la última opción.
-- Un solo escritor a la vez **por repositorio** —no por sesión—: nunca el
-  constructor de Claude y un executor de Codex sobre el mismo repo. Repos
-  distintos no se bloquean entre sí. Los reviewers read-only sí van en paralelo.
-- El reviewer nunca hereda la sesión del constructor.
-- El wrapper no pasa nunca flags de bypass (`--dangerously-bypass-*`,
-  `--ignore-rules`).
-- Publicar cambios (`git push`) es exclusivo del usuario; `git commit` solo
-  bajo pedido explícito, sin atribución de IA en los mensajes.
+**Sí:** objetivo, contrato, paths (no contenido), tests (ruta + comando),
+restricciones. **No:** historial del chat, archivos completos, razonamientos,
+logs largos.
 
 ---
 
 ## 3. Arquitectura
 
-### Vista general
-
 ```mermaid
 flowchart TD
-    USR([👤 Usuario]) --> TL
-
-    subgraph LEAD["1. TECH LEAD — CLAUDE OPUS"]
-        TL["/orquestador<br/><i>Única interfaz con el usuario</i>"]
-        F05["Fase 0.5: Presupuesto & Routing<br/><i>Lee cuotas Claude/Codex</i>"]
-        TL --> F05
+    USR([Usuario]) --> R
+    subgraph S["Sesion"]
+        R["Razonador<br/><i>Claude (skill orquestador) o Codex</i>"]
+        H["Hooks orq<br/>session-start · metrics · git-guard"]
+        SL["orq statusline<br/><i>rate_limits por stdin</i>"]
     end
-
-    F05 --> DISP["Reparto del Trabajo"]
-
-    subgraph EXEC["2. CAPA DE EJECUCIÓN"]
-        subgraph CL["Claude Agents (Sonnet)"]
-            EXP["explorador <i>(read-only)</i>"]
-            TST["tester <i>(RED TDD)</i>"]
-            CON["constructor <i>(GREEN)</i>"]
-        end
-
-        subgraph CX["Codex CLI (codex-run.ps1)"]
-            CXC["-Role constructor <i>(write)</i>"]
-            CXR["-Role reviewer / security-reviewer"]
-            CXV["-Role verifier / docs-researcher"]
-        end
+    R -->|DIRECT| R
+    R -->|DELEGATED| SA["Subagentes Claude<br/>explorador · tester · constructor"]
+    R -->|"orq run"| RT
+    subgraph RT["Runtime orq (Node)"]
+        Q["quota: veredicto + estado"]
+        CX["providers/codex<br/>exec · resume · schemas"]
+        J["jobs (ASYNC_REVIEW, tope 1)"]
+        W["worktrees (PARALLEL)"]
+        CK["checkpoints · plan"]
+        CI["CodeIntelProvider<br/>codegraph · native"]
+        T["telemetria .orquestador/decisions.jsonl"]
     end
-
-    DISP --> CL
-    DISP --> CX
-
-    CL --> ARB
-    CX --> ARB
-
-    subgraph FINAL["3. ARBITRAJE Y ENTREGA"]
-        ARB["Claude Arbitra & Consolida<br/><i>Lee git diff · evalúa findings · aplica fixes &lt;50 líneas</i>"]
-        OUT([📦 Entrega al Usuario])
-        ARB --> OUT
-    end
-
-    classDef lead fill:#1e293b,stroke:#38bdf8,stroke-width:2px,color:#ffffff
-    classDef claude fill:#064e3b,stroke:#10b981,stroke-width:1.5px,color:#ffffff
-    classDef codex fill:#78350f,stroke:#f59e0b,stroke-width:1.5px,color:#ffffff
-    classDef gate fill:#4c1d95,stroke:#8b5cf6,stroke-width:2px,color:#ffffff
-    classDef io fill:#334155,stroke:#94a3b8,stroke-width:2px,color:#ffffff
-
-    class TL,F05,ARB lead
-    class EXP,TST,CON claude
-    class CXC,CXR,CXV codex
-    class DISP gate
-    class USR,OUT io
+    CX --> CODEX["codex exec<br/>agents.enabled=false"]
+    SL --> Q
+    H --> T
+    CX --> T
 ```
 
-**Tres invariantes estructurales:**
+**Invariantes estructurales:**
 
-1. **Un solo Tech Lead.** Cada invocación a Codex lleva `-c agents.enabled=false`, así que Codex no puede abrir su propio subloop.
-2. **Un solo escritor a la vez.** Nunca el constructor de Claude y un executor de Codex sobre el mismo working tree. Los reviewers read-only sí van en paralelo.
-3. **Codex nunca habla con el usuario.** Devuelve un contrato estricto de salida y se apaga.
+1. **Un solo razonador por tarea.** Todo `codex exec` lleva
+   `-c agents.enabled=false`: el worker no abre su propio subloop.
+2. **Un escritor por región de archivos** (BR-019).
+3. **Codex worker nunca habla con el usuario.** Devuelve un contrato y se apaga.
+4. **El runtime no asume jerarquía.** `orq` funciona igual invocado por Codex
+   como razonador; Codex no necesita lanzar Claude.
 
-### Roles Claude
+### Topologías
 
-| Agente | Modelo | Qué hace |
+| Topología | Qué es | Runtime |
 |---|---|---|
-| `/orquestador` (skill) | Opus | Habla con vos, decide, delega, arbitra, implementa lo que ya entiende y aplica los fixes sobre trabajo delegado |
-| `explorador` | Sonnet | Solo lectura. Entiende un flujo completo y devuelve contrato, riesgos y `archivo:línea` |
-| `tester` | Sonnet | Escribe tests RED desde la spec. Solo toca archivos de test |
-| `constructor` | Sonnet | Spec + RED → GREEN. No escribe sus propios tests |
+| DIRECT | El razonador hace todo | nada |
+| DELEGATED | El razonador planifica, un worker ejecuta | subagente Claude u `orq run` |
+| ASYNC_REVIEW | Review adversarial no bloqueante de algo ya verde | `orq run --background` |
+| PARALLEL | Dos unidades independientes a la vez | `orq worktree` si ambas escriben |
 
-Los tres subagentes tienen `Agent`/`Task` bloqueados: **solo el Orquestador
-delega**. `tester` y `constructor` precargan la disciplina `ponytail`.
+### Módulos
 
-La skill del orquestador se carga en dos niveles: `SKILL.md` trae la política que
-se usa en toda tarea, y `skills/orquestador/references/` (`routing.md`,
-`codex.md`, `docs-matrix.md`, `capsule.md`, `retro.md`) trae el detalle que se lee
-solo cuando la ruta lo pide. El preámbulo permanente pasó de ~31 KB a ~18 KB.
-
-### Cierre de fase — las dos salidas a sesión limpia
-
-Al cerrar una fase el orquestador ofrece dos handoffs, y el usuario elige uno,
-los dos o ninguno. Las dos arrancan en sesión nueva porque una sesión larga
-acumula contexto degradado y seguir arreglando ahí produce más errores.
-
-| | Qué arregla | Quién la corre |
-|---|---|---|
-| **A — Retroalimentación** | El código: defectos abiertos, pendientes, deuda de la fase | Sesión Claude nueva |
-| **B — Feedback** | El orquestador: qué regla falló y qué ajustar | Sesión nueva o `-Role reviewer` |
-
-Las gobierna un invariante: **el log es evidencia, el resumen del orquestador es
-testimonio.** Los dos handoffs leen `decisions.jsonl` y `-Feedback` primero y la
-narrativa al final; cuando discrepan, gana el log. Es la misma regla que "baseline
-medida, nunca citada", aplicada a la retro de sí misma — un resumen lo escribe la
-parte evaluada, al final y de memoria.
-
-La ruta B filtra sus recomendaciones por un criterio único: **una regla nueva
-existe porque corrige un fallo observado en el log de esa fase**, no porque suena
-bien. Una recomendación sin evento detrás se descarta. El resultado se le entrega
-al usuario y lo aplica él: el orquestador no se auto-modifica desde su propia
-retro. Procedimiento completo en `references/retro.md`.
-
-**`explorador` no es el default para localizar código.** La exploración sube una
-escalera de costo y para en el primer escalón que alcanza: `git ls-files` para la
-estructura del repo, Serena para símbolos y referencias, `Grep` para texto, y
-recién el `explorador` LLM para entender un flujo completo con sus riesgos y su
-contrato. Cuando se levanta, recibe scope dirigido —entrypoints concretos y qué
-devolver—, no un área.
+| Módulo | Qué hace |
+|---|---|
+| `src/cli.ts` | Dispatch de subcomandos (`node:util.parseArgs`) |
+| `src/core/proc.ts` | Spawn sin shell, shims npm de Windows, timeout, kill de árbol |
+| `src/core/quota.ts` | Gate de dos capas, puro |
+| `src/core/contracts.ts` | Roles, schemas, invariante, prompt del worker, guard de bypass |
+| `src/core/telemetry.ts` | Filas por sesión, informe, feedback |
+| `src/core/jobs.ts` · `config.ts` · `state.ts` | Jobs en background, `orq.config.json`, rutas y JSON |
+| `src/providers/claude.ts` · `codex.ts` | Detección, auth, cuota, exec, sesiones, heartbeat |
+| `src/commands/*` | `run`, `hook`, `statusline`, `install`, `checkpoint`, `worktree`, `codeintel` |
+| `src/install/merge.ts` · `files.ts` | Merges puros e inversos; escritura con respaldo |
+| `kit/` | Skills, agents, roles Codex, rules, `AGENTS.md` |
 
 ### Roles Codex
 
-Se invocan con `codex-run.ps1 -Role <rol>`. Las instrucciones de cada rol salen
-de `~/.codex/agents/<rol>.toml` — el kit de Codex es la fuente de verdad, no se
-duplican prompts.
-
-| Rol | Tier | Sandbox | Cuándo |
+| Rol | Tier | Contrato | Cuándo |
 |---|---|---|---|
-| `constructor` | worker | danger-full-access | Implementación voluminosa contra tests RED ya escritos |
-| `reviewer` | worker / high | danger-full-access | Correctness, regresiones, races, edge cases |
-| `security-reviewer` | worker / high | danger-full-access | auth, permisos, pagos, uploads, tokens, trust boundaries |
-| `verifier` | cheap / low | danger-full-access | build, lint, typecheck, suites largas |
-| `docs-researcher` | cheap | danger-full-access | Segunda opinión documental, versiones, deprecaciones |
+| `constructor` | worker | impl | Implementación voluminosa contra RED |
+| `tester-tdd` | worker | impl | RED independiente cuando razona Codex |
+| `verifier` | cheap | impl | build/lint/typecheck/suite larga |
+| `reviewer` | worker | review | Review adversarial |
+| `security-reviewer` | worker | review | auth, permisos, pagos, tokens |
+| `docs-researcher` | cheap | docs | Documentación actual |
 
-Los cinco corren en `danger-full-access` no por necesitar escribir —`reviewer`,
-`security-reviewer` y `docs-researcher` no escriben— sino porque bajo
-`[windows] sandbox = "elevated"` el modo `read-only` no puede lanzar procesos
-hijo (`git`, `rg`) y Codex muere con `CreateProcessAsUserW` error 1920. Para los
-roles lectores la barrera es el prompt más `agents.enabled=false`, igual que en
-`verifier`. Ver [DECISIONS.md § D-017](DECISIONS.md#d-017--todos-los-roles-codex-en-danger-full-access-en-windows).
+Todos declaran `sandbox_mode = "danger-full-access"` en su `.toml` (D-017: bajo
+`[windows] sandbox = "elevated"` los otros modos no pueden lanzar procesos). Para
+los lectores la barrera es el prompt más `agents.enabled=false`.
 
-Por qué esos cinco roles y no los demás del kit Codex (`explorador`,
-`tester-tdd`, `e2e-browser`, `browser-diagnostics`, `$constructor`,
-`$revisor-completo`) → [DECISIONS.md § D-002](DECISIONS.md#d-002--roles-de-codex-deliberadamente-no-usados-en-el-flujo-híbrido).
+### Modelos por tier
 
-### Los casos A–H
+`codex debug models` → `visibility == "list"`, orden por `priority`: `lead` =
+rank 1, `worker` = rank 2, `cheap` = rank 3, degradando si faltan. El `effort`
+se valida contra `supported_reasoning_levels`. Ningún slug está fijo en el kit.
 
-| Caso | Ejemplos | Ejecuta | ¿Codex? |
-|---|---|---|---|
-| **A — trivial** | typo, rename, fix de pocas líneas, explicación | Opus directo | **No.** Ni consulta cuotas |
-| **B — normal** | feature acotada, bug con causa clara | Pipeline Claude | No por defecto |
-| **B+ — con riesgo** | toca contratos, concurrencia, datos | Pipeline Claude + reviewer | Sí, solo review |
-| **C — voluminosa** | muchos archivos, mucho código nuevo | Claude RED → Codex GREEN | Sí, implementa |
-| **D — seguridad** | auth, pagos, permisos, uploads | Pipeline + security-reviewer | Sí |
-| **E — verificación cara** | build/lint/typecheck/suite larga | verifier | Sí |
-| **F — investigación extensa** | comparar libs, migración de versión | docs-researcher | Sí |
-| **G — delegación total** | Tarea autocontenida que no necesita arbitraje, con Claude apretado | `$constructor` de Codex | Sí, con subloop |
-| **H — auditoría** | "revisá todo el proyecto" | `$revisor-completo` | Sí |
+### Code intelligence
 
-### Resolución de modelos por tier
-
-El wrapper resuelve los modelos de Codex contra el **catálogo vivo**, sin IDs
-hardcodeados:
-
-```powershell
-codex debug models   # slug, visibility, priority, supported_reasoning_levels
-```
-
-Se filtran los `visibility == "list"`, se ordenan por `priority` y se asignan
-por posición:
-
-| Tier | Regla | Hoy resuelve a |
-|---|---|---|
-| `lead` | rank 1 | `gpt-5.6-sol` |
-| `worker` | rank 2 (cae a rank 1 si no existe) | `gpt-5.6-terra` |
-| `cheap` | rank 3 (cae a `worker` si no existe) | `gpt-5.6-luna` |
-
-El `effort` pedido se valida contra los `supported_reasoning_levels` del modelo
-resuelto; si no está soportado, cae al `default_reasoning_level`. Así un
-`gpt-5.7-*` futuro, o un modelo que no soporte `ultra`, no rompen nada.
-
-Del lado de Claude se usan los alias estables `opus` / `sonnet` / `haiku`.
-
-### Límites conocidos
-
-- **El guard bloquea comandos compuestos.** Si un comando de shell contiene la
-  cadena que dispara la regla en cualquier parte, se deniega el comando entero.
-  Es el comportamiento correcto, pero sorprende la primera vez.
-- **`codex exec resume` no acepta `-C` ni `-s`.** Hereda cwd y sandbox de la
-  sesión original. El wrapper ya lo contempla.
-- **Un hook debe emitir solo el JSON del contrato en stdout.** Cualquier salida
-  extra rompe la corrida y la cuelga hasta el timeout.
-- **El tamaño del rollout es un proxy, no una medida exacta** de contexto
-  consumido. Sirve para decidir reuso; no es un contador de tokens.
-- **PowerShell 5.1 corre sobre .NET Framework**, que no tiene
-  `ProcessStartInfo.ArgumentList` ni `StandardInputEncoding`. El wrapper arma el
-  quoting de Windows a mano y escribe bytes UTF-8 al stream.
-- **`Set-Content -Encoding UTF8` escribe BOM** en PS 5.1 y Codex rechaza el schema.
-  El wrapper usa `UTF8Encoding($false)`.
-- **El sandbox puede denegar intérpretes instalados desde la Microsoft Store**
-  (el `python.exe` de WindowsApps). Codex lo reporta como riesgo y marca los
-  tests `NOT_RUN` en vez de mentir un GREEN.
-- **La cuota de Claude se lee del cache de la statusline.** Si desactivás la
-  statusline, esa mitad del gate queda ciega (se trata como WARN, no como GO).
+`CodeIntelProvider` (`src/commands/codeintel.ts`): `detect`, `ensureIndex`,
+`symbols`, `refs`, `impact`, `orient`. codegraph (tree-sitter + grafo, pinneado
+en `~/.orquestador/tools`, MCP en Claude y Codex), native
+(`git ls-files` + `git grep`). Si el configurado no está, cae a native. Es
+descubrimiento: el código que se edita se lee entero.
 
 ---
 
 ## 4. Flujos críticos
 
-### Gate de presupuesto y routing
-
-#### Macro-Flujo y Presupuesto (Gate System)
-
-```mermaid
-flowchart TD
-    REQ([📥 Pedido del Usuario]) --> OVR["¿Hay Override Explícito?"]
-
-    subgraph PHASE1["1. Filtro Inicial & Overrides"]
-        OVR -->|Override Directo| PROC["Aplicar Regla del Usuario"]
-        OVR -->|Sin Override| TRIV["¿Es Trivial?<br/><i>typo / rename / &lt;10 líneas</i>"]
-        TRIV -->|Sí| CASO_A["<b>Caso A — Trivial</b><br/>Opus resuelve solo<br/><i>Sin agentes, sin cuotas</i>"]
-        TRIV -->|No| MEM["mem_search de la zona"]
-    end
-
-    MEM --> BUD["codex-run.ps1 -BudgetOnly"]
-
-    subgraph PHASE2["2. Presupuesto & Gate de Codex"]
-        BUD --> GATE{"Cuota Libre<br/>de Codex"}
-        GATE -->|"< 10% o Limit"| NOGO["<b>NO-GO Codex</b><br/>Solo Claude"]
-        GATE -->|"10% a 20%"| WARN["<b>WARN</b><br/>Solo si user lo pidió"]
-        GATE -->|"20% a 40%"| PART["<b>GO Acotado</b><br/>Review / Verify / Docs"]
-        GATE -->|"> 40%"| FULL["<b>GO Normal</b><br/>Delegación Estándar"]
-
-        NOGO --> CLQ{"¿Claude<br/>crítico?"}
-        CLQ -->|No| CASO_B["<b>CLAUDE-LEAD</b><br/>Pipeline Claude"]
-        CLQ -->|Sí| WAIT["<b>SURVIVAL</b><br/>Checkpoint e informar<br/><i>No arrancar nada nuevo</i>"]
-    end
-
-    subgraph PHASE3["3. Estado de Capacidad de Claude"]
-        FULL --> LVL{"Nivel de Claude<br/><i>5h + gate 7d</i>"}
-        PART --> LVL
-        LVL -->|"< 50%"| BAL["<b>BALANCED</b><br/>Reparto por naturaleza"]
-        LVL -->|"50–70%"| PREF["<b>CODEX-PREFERRED</b><br/>Claude piensa · Codex ejecuta"]
-        LVL -->|"> 70%"| SON["<b>SONNET-LEAD</b><br/>Recomendar /model sonnet<br/><i>una sola vez</i>"]
-
-        BAL --> NAT_EVAL["Evaluar Naturaleza<br/>de la Tarea"]
-        PREF --> NAT_EVAL
-        SON --> NAT_EVAL
-    end
-
-    WARN --> CASO_B
-
-    NAT_EVAL --> ROUTE["<b>Routing a Casos A–H</b><br/><i>ver Matriz abajo</i>"]
-
-    classDef io fill:#334155,stroke:#94a3b8,stroke-width:2px,color:#ffffff
-    classDef gate fill:#4c1d95,stroke:#8b5cf6,stroke-width:2px,color:#ffffff
-    classDef soloClaude fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#ffffff
-    classDef conCodex fill:#78350f,stroke:#f59e0b,stroke-width:2px,color:#ffffff
-    classDef stop fill:#881337,stroke:#f43f5e,stroke-width:2px,color:#ffffff
-    classDef step fill:#1e293b,stroke:#38bdf8,stroke-width:1.5px,color:#ffffff
-
-    class REQ,ROUTE io
-    class OVR,TRIV,GATE,CLQ,LVL gate
-    class CASO_A,CASO_B,BAL soloClaude
-    class PART,FULL,PREF,SON conCodex
-    class NOGO,WAIT stop
-    class PROC,MEM,BUD,NAT_EVAL step
-```
-
-#### Matriz de Routing por Naturaleza de la Tarea
-
-```mermaid
-flowchart LR
-    subgraph TAREA["Naturaleza de la Tarea"]
-        T_NORM["Feature acotada / Bug simple"]
-        T_QUAL["Contratos / Concurrencia / Datos"]
-        T_VOL["Mucho código nuevo / Varios archivos"]
-        T_AUTH["Auth / Permisos / Tokens / Pagos"]
-        T_TEST["Suite larga / Build / Typecheck"]
-        T_DOCS["Comparar libs / Deprecaciones"]
-        T_AUDIT["Auditoría completa del repo"]
-    end
-
-    subgraph PIPELINE["Pipeline Asignado"]
-        RB["<b>Caso B — Normal</b><br/>Pipeline Claude sin Codex"]
-        RBP["<b>Caso B+ — Con Riesgo</b><br/>Claude + Codex reviewer"]
-        RC["<b>Caso C — Voluminoso</b><br/>Claude RED ➔ Codex GREEN"]
-        RD["<b>Caso D — Seguridad</b><br/>Claude + security-reviewer"]
-        RE["<b>Caso E — Verificación</b><br/>Codex verifier"]
-        RF["<b>Caso F — Investigación</b><br/>Codex docs-researcher"]
-        RH["<b>Caso H — Auditoría</b><br/>$revisor-completo Codex"]
-    end
-
-    T_NORM --> RB
-    T_QUAL --> RBP
-    T_VOL --> RC
-    T_AUTH --> RD
-    T_TEST --> RE
-    T_DOCS --> RF
-    T_AUDIT --> RH
-
-    classDef tbox fill:#1e293b,stroke:#64748b,stroke-width:1.5px,color:#ffffff
-    classDef cbox fill:#0f172a,stroke:#38bdf8,stroke-width:2px,color:#ffffff
-    classDef secbox fill:#451a03,stroke:#fbbf24,stroke-width:2px,color:#ffffff
-
-    class T_NORM,T_QUAL,T_VOL,T_AUTH,T_TEST,T_DOCS,T_AUDIT tbox
-    class RC,RD,RBP,RE,RF,RH secbox
-    class RB cbox
-```
-
-### TDD híbrido — caso C
-
-El orden es duro y no se invierte:
-
-```
-tester (Claude, Sonnet) → tests RED desde la SPEC
-        ↓
-constructor (Claude o Codex) → GREEN, sin tocar los tests
-        ↓
-Claude revisa el diff
-```
-
-Así se ve el caso C completo, con los dos puntos donde el ciclo puede volver atrás:
+### Delegación a Codex (`orq run`)
 
 ```mermaid
 sequenceDiagram
-    autonumber
-    actor U as 👤 Usuario
-    participant O as 🧠 Orquestador<br/>(Opus)
-    participant T as 🧪 tester<br/>(Sonnet)
-    participant X as 🛠️ Codex<br/>constructor
-    participant V as ⚡ Codex<br/>verifier
-    participant R as 🔍 Codex<br/>reviewer
+    participant R as Razonador
+    participant O as orq run
+    participant C as codex
+    R->>O: --role --reason --spec [--resume]
+    O->>O: reason valido? (si no: exit 6)
+    O->>C: login status (sin ChatGPT: exit 5, provider_unavailable)
+    O->>C: app-server rateLimits (NO-GO: exit 2, provider_unavailable)
+    O->>C: debug models -> tier
+    O->>C: exec --output-schema -o -c agents.enabled=false (stdin: prompt)
+    C-->>O: --json stream -> live log + heartbeat
+    O->>O: exit != 0 -> 4 · sin JSON -> 4 · invariante -> 4
+    O-->>R: 10-20 lineas + sesion y veredicto de reuso
+    O->>O: fila delegation en decisions.jsonl
+```
 
-    U->>O: "Implementá X"
-    O->>O: mem_search · presupuesto · routing
-    O-->>U: Plan: quién hace qué y por qué
-    U->>O: "Procedé"
+### ASYNC_REVIEW
 
-    O->>T: SPEC (sin código: no existe todavía)
-    T-->>O: tests RED + comando
+```
+fases 1-2 GREEN -> orq checkpoint fast
+               -> orq run --role reviewer --background --task "fases 1-2"
+razonador sigue con fase 3 (si no depende de 1-2 con 'hard')
+orq jobs <id> -> findings -> arbitraje uno por uno -> --finding accepted|rejected
+```
 
-    Note over O,X: Solo la spec, los paths y los tests.<br/>Nunca el historial del chat.
-    O->>X: spec + tests RED + restricciones
-    X-->>O: 10-20 líneas: archivos, resumen, GREEN/RED, riesgos
+### TDD híbrido
 
-    O->>V: correr build y suite
-    V-->>O: PASS / FAIL
-
-    alt Falla algo que escribió ese mismo executor
-        O->>X: -Resume mismo id + solo el delta
-        X-->>O: 3 líneas, corregido
-    end
-
-    Note over O,R: Sesión NUEVA: el reviewer no puede<br/>heredar el contexto de quien escribió.
-    O->>R: revisar el diff
-    R-->>O: findings [P#] archivo:línea
-
-    O->>O: git diff · evalúa cada finding con evidencia
-
-    alt Findings confirmados y chicos
-        O->>O: fix directo (menos de 50 líneas)
-    else Tests siguen RED
-        O->>T: corregir spec o revisar el test
-    end
-
-    O-->>U: Qué se hizo, qué se descartó y por qué
+```
+contrato congelado -> tester (Claude) RED -> orq run --role constructor GREEN
+-> checkpoint fast -> ejercitar la app real si es visible -> review del diff
+-> (riesgo) orq checkpoint deep
 ```
 
 ---
 
 ## 5. Datos
 
-### Memoria compartida (Engram)
+Tres lugares, nada más:
 
-Claude y Codex comparten **una sola** base: `%USERPROFILE%\.engram\engram.db`.
-No hay nada que configurar; ambos ya la tienen registrada.
-
-La política evita duplicados en el origen, sin tener que reconciliar topic keys
-entre proveedores:
-
-- **Claude es el único que escribe decisiones.** Arquitectura, convenciones,
-  gotchas de dominio, el "por qué se hizo así". Es el que tiene el contexto completo.
-- **Codex es read-mostly.** Su prompt le dice: consultá si el área pudo haberse
-  trabajado antes, pero **no guardes** — reportá el hallazgo en `risks` y el Tech
-  Lead decide si merece persistirse.
-- **Excepción:** en delegación total (rutas G y H) Codex sí guarda, porque ahí
-  Claude no participó.
-
-No se guarda: typos, cambios mecánicos, logs, resultados triviales.
-
-### Observabilidad
-
-Un archivo, sin dashboard ni telemetría: `.orquestador/decisions.jsonl` en el repo
-de trabajo. Escriben dos productores en el mismo formato: `codex-run.ps1` pone una
-línea por delegación a Codex, y el hook `orq-metrics.ps1` pone una línea por spawn
-de subagente Claude y por corrida de tests.
-
-```json
-{"ts":"2026-08-20T22:26:35","task":"slugify","role":"constructor","tier":"worker",
- "model":"gpt-5.6-terra","effort":"medium","sandbox":"danger-full-access",
- "reused":false,"session":{"id":"01a021ee-...","rollout_kb":134},
- "codex_free_pct":80,"claude_5h_used":29,"claude_7d_used":25,
- "state":"CODEX-PREFERRED","phase":"construct","retry_of":null,
- "exit_code":0,"blocked":false,"findings":null}
-```
-
-Responde lo que importa: si la tarea fue Claude-only o híbrida, qué roles y
-modelos se levantaron, cómo estaban las cuotas y el estado al decidir, si se
-reusó sesión y cuánto había crecido, y cómo terminó.
-
-`phase` y `retry_of` los pasa el orquestador (`-Phase`, `-RetryOf`); el resto
-sale del wrapper. `retry_of` registra **solo reintentos por RED lógico**
-(BR-008): una falla de sandbox o de red no es un retry.
-
-Las entradas del hook llevan `event` —las del wrapper no— y es lo que las separa
-al agregar:
-
-```json
-{"ts":"2026-08-28T10:03:00","event":"spawn_end","agent":"tester","task":"RED de impuestos","duration_s":660,"tool_use_id":"toolu_..."}
-{"ts":"2026-08-28T10:05:00","event":"test_run","scope":"full","result":"RED","command":"npm test","duration_s":95}
-{"ts":"2026-08-28T10:20:00","event":"friction","kind":"rework","phase":"test","detail":"el tester eligio la fuente sin preguntar"}
-```
-
-El punto de instrumentación es el par `PreToolUse`/`PostToolUse` sobre la
-herramienta `Agent`. **`SubagentStop` no sirve**: su payload trae `session_id`,
-`transcript_path`, `cwd` y `reason`, sin rol ni duración.
-
-#### Lo que el payload trae de verdad
-
-Verificado contra un evento real de `PostToolUse`/`Bash`, no contra la
-documentación —que nombra el campo `tool_result` cuando en realidad es
-`tool_response`—:
-
-| Campo | Para qué se usa |
+| Dónde | Qué |
 |---|---|
-| `duration_ms` | Duración exacta. Cuando está, no hace falta emparejar nada |
-| `tool_use_id` | Id único de invocación: emparejamiento exacto si hiciera falta |
-| `prompt_id` | Agrupa las herramientas de un mismo turno del usuario |
-| `tool_response.stdout` / `.stderr` | De ahí sale `result: RED/GREEN` de cada corrida |
+| `~/.orquestador/` | `claude-usage.json`, `codex-usage.json`, `activity/<pid>.json`, `logs/` (un log vivo por corrida, últimos 20), `runtime/`, `tools/`, `manifest.json`, `backups/` (últimos 5) |
+| `<repo>/.orquestador/` | `decisions.jsonl`, `jobs/`, `plan.json`. Se auto-ignora (`.gitignore` con `*`) |
+| `~/.claude`, `~/.codex` | Config de los proveedores; solo la toca `orq init/uninstall/migrate` |
 
-**No hay exit code** en el payload, así que el resultado de una corrida se decide
-por las firmas de fallo en la salida del runner, descartando primero los
-`0 failed` que si no leerían como RED. Un falso negativo pierde una métrica y no
-rompe nada. `Get-Durations` prefiere `duration_s` y solo cae a emparejar FIFO
-cuando falta.
+Los hooks escriben solo dentro de un repo git, en su raíz.
 
-#### Los dos modos de lectura
+### `decisions.jsonl`
 
-```powershell
-powershell -File ~/.claude/hooks/orq-metrics.ps1 -Report     # los numeros
-powershell -File ~/.claude/hooks/orq-metrics.ps1 -Feedback   # el informe de cierre
-```
+Toda fila: `ts`, `session_id`, `event`.
 
-`-Report` da delegaciones por rol con duración, `NEEDS_INFO`, retries, sesiones
-reusadas, findings, suites completas contra dirigidas y corridas en RED.
+| `event` | Productor | Campos principales |
+|---|---|---|
+| `gate` | hook SessionStart | `state`, `decision`, cuotas |
+| `spawn_request` | hook PreToolUse(Agent) | `agent_type`, `task` |
+| `subagent_start` / `subagent_stop` | hooks SubagentStart/Stop | `agent_id`, `agent_type` |
+| `test_run` | hook PostToolUse(Bash\|PowerShell) | `scope`, `result`, `command`, `tool` |
+| `delegation` | `orq run` | `reason`, `role`, `model`, `status`, `findings`, `findings_by_severity`, `duration_s`, `session`, `retry_of`, `clarify_of`, cuotas y estado |
+| `decision` | `orq metrics --decision` / `orq run` | `delegation_decision`, `reason`, `task`, `topology` |
+| `finding_verdict` | `orq metrics --finding` | `verdict`, `detail` |
+| `friction` | `orq metrics --note` | `kind` (set cerrado), `detail`, `phase` |
+| `checkpoint` | `orq checkpoint` | `kind`, `pass`, `results` |
 
-`-Feedback` arma el informe de cierre con la forma de la sesión de referencia:
-los números, las fricciones que las explican, la tabla de delegaciones una por
-una, y una última sección con **lo que el log no sabe**. Esa sección no se
-rellena sola a propósito: qué delegación valió lo que costó, de qué familia eran
-los defectos y qué regla los habría evitado lo contesta el orquestador. Un
-informe que se inventa esa parte no sirve para cambiar una regla.
-
-#### Fricción declarada
-
-Lo cualitativo no es observable, así que se declara en el momento en que ocurre
-—nunca en una retro al final, donde ya se olvidó el detalle:
-
-```powershell
-powershell -File ~/.claude/hooks/orq-metrics.ps1 -Note rework -Detail "..." -Phase test
-```
-
-Categorías cerradas por `ValidateSet`: `rework`, `review-defect`,
-`predictable-needs-info`, `wasted-verify`, `wrong-route`, `env-gotcha`. Es un set
-cerrado a propósito — una categoría libre por evento vuelve el log inagrupable, y
-agrupar es todo lo que se le pide.
-
-Solo se anota fricción, nunca lo que salió bien: el log existe para encontrar qué
-cambiar. **Los tokens de subagentes Claude siguen fuera** y no se fingen: los
-hooks no los ven.
+`orq metrics` filtra por la sesión actual (`CLAUDE_CODE_SESSION_ID`, o la última
+del log), `--session <id>` o `--all`. Sin filas de la sesión, lo dice. Las líneas
+corruptas se saltean.
 
 ---
 
@@ -909,35 +485,25 @@ hooks no los ven.
 
 ### Codex — cuota vía JSON-RPC
 
-Método JSON-RPC oficial contra `codex app-server`:
+`codex app-server`: `initialize` → (respuesta) → `initialized` +
+`account/rateLimits/read`. Se toma la ventana más ajustada de todas
+(`rateLimits` y `rateLimitsByLimitId`, primary y secondary). Al terminar se mata
+el árbol de procesos (en Windows `codex.cmd` lanza Node, que lanza el binario).
 
-```
-initialize → initialized → account/rateLimits/read
-```
+### Claude — cuota vía stdin de la statusLine
 
-```json
-{"rateLimits":{"planType":"plus",
-  "primary":{"usedPercent":20,"windowDurationMins":10080,"resetsAt":1787316765},
-  "secondary":null,
-  "credits":{"hasCredits":false,"balance":"0"},
-  "spendControlReached":false,"rateLimitReachedType":null}}
-```
+Claude Code pasa a `statusLine.command` un JSON con `rate_limits.five_hour` y
+`seven_day` (`used_percentage`, `resets_at`), `context_window`, `cost` y
+`session_id`. `orq statusline` persiste `rate_limits` (solo si vienen) y dibuja
+modelo, directorio y branch (de `.git/HEAD`, sin lanzar git), contexto, cuota de
+Claude, cuota de Codex (cache, refresco desacoplado cada 60 s) y `CX> <rol>
+<tiempo> <evento>` mientras Codex corre.
 
-`primary` es la ventana de 7 días (10080 min), `secondary` la corta cuando existe.
-La respuesta puede traer varios límites en `rateLimitsByLimitId` (`codex`,
-`codex_other`); el wrapper toma **la ventana más ajustada de todas**.
+### MCPs
 
-### Claude — cuota vía cache de statusline
-
-La statusline consulta `api.anthropic.com/api/oauth/usage` en cada turno y
-cachea el resultado (TTL 60s) en `%TEMP%\claude\statusline-usage-cache.json`.
-Leerlo es un `cat`, sin red propia ni token nuevo:
-
-```json
-{"five_hour":{"utilization":72,"resets_at":"..."},
- "seven_day":{"utilization":22,"resets_at":"..."},
- "extra_usage":{"used_credits":3258.0,"monthly_limit":5000,"spend_limit_reached":false}}
-```
+`orq init` registra con los CLIs (`claude mcp add --scope user`, `codex mcp add`)
+lo que falte: `context7` (HTTP) y `codegraph`. Chrome DevTools MCP no se instala
+por defecto.
 
 ---
 
@@ -945,63 +511,44 @@ Leerlo es un `cat`, sin red propia ni token nuevo:
 
 ### Git
 
-Dos reglas duras: **publicar cambios es exclusivo del usuario**, y **los commits
-solo bajo pedido explícito**. Sin atribución de IA en los mensajes.
+Publicar es exclusivo del usuario; commits solo bajo pedido; sin atribución de
+IA. Capas:
 
-Cuatro capas, porque una sola no alcanza:
-
-| Capa | Qué cubre | Protege a |
+| Capa | Cubre | Protege a |
 |---|---|---|
-| `~/.claude/settings.json` deny | Las formas directas | Claude |
-| `~/.claude/hooks/git-guard.ps1` | **Todas**, incluidas `git -C` y `--git-dir=` | Claude |
-| `~/.codex/rules/orquestador.rules` | Formas directas + `-C`/`--git-dir` como `prompt` | Codex |
-| `~/.codex/hooks/orquestador-git-guard.ps1` | **Todas** | Codex |
-| Prompt (SKILL.md / AGENTS.md) | Intención | Ambos |
+| `settings.json` deny: `Bash(git push *)`, `PowerShell(git push *)` (+ `git.exe`) | Formas directas | Claude |
+| Hook `orq hook git-guard`, matcher `Bash\|PowerShell` | Todas: opciones globales de git (`-C`, `-c`, `--no-pager`, `--git-dir`…), ruta completa, `& git`, cadenas, argv, `bash -c`, `pwsh -Command`, `cmd /c`, `iex`, `$(…)` | Claude |
+| `~/.codex/rules/orquestador.rules` | Prefijos + `-C`/`--git-dir` como prompt | Codex |
+| Mismo hook en `~/.codex/hooks.json` | Todas | Codex |
 
-**Un deny de Claude no protege al proceso Codex**: `codex exec` es un proceso hijo
-con su propio motor de permisos. Por eso cada entorno necesita su propia capa.
+La deny rule sola no alcanza: según la documentación de permisos,
+`Bash(git push *)` no matchea `git -C . push origin main`. El hook no usa una
+regex sobre el string: `src/core/guard.ts` tokeniza respetando comillas, busca
+`git` en posición de comando y mira el subcomando, así que tampoco bloquea texto
+inerte (`echo git push`, un mensaje de commit). Límite: un alias de git definido
+en la config del usuario no se ve.
 
-La regla de git está declarada en tres capas de prompt/policy distintas, y **no
-se deduplica**: `codex/Orquestador/.codex/rules/orquestador.rules` (execpolicy),
-`codex/Orquestador/AGENTS.md` (prompt de Codex),
-`Orquestador/skills/orquestador/SKILL.md` (prompt de Claude), más el hook
-`Orquestador/hooks/git-guard.ps1`.
+### Runtime
 
-Verificable sin publicar nada:
+- `spawn` siempre con array de args; nunca `shell: true`, salvo los comandos de
+  checkpoint que declara el propio repo en `orq.config.json`.
+- `assertNoBypass` rechaza `--dangerously-bypass-*`, `--ignore-rules` y
+  `--yolo` antes de lanzar Codex.
+- Nombres de worktree validados (`[a-z0-9_-]`): sin path traversal ni inyección
+  en la branch.
+- No se loguean prompts, specs ni variables de entorno; el stream de Codex va a
+  `~/.orquestador/logs/`, local, un archivo por corrida.
+- Sin API key: `orq run` exige sesión ChatGPT (exit 5).
 
-```powershell
-codex execpolicy check --rules ~/.codex/rules/orquestador.rules git -C . push origin main
-```
+### Instalación
 
-El hook evalúa el string completo del comando con una expresión regular que
-contempla `-C`, `-c`, `--git-dir`, `--work-tree`, `git.exe` y las cadenas con
-`&&`. Está verificado contra las diez formas, incluidos los negativos
-(`git status`, `npm run push-docs` y un commit cuyo mensaje contiene la palabra
-no se bloquean).
-
-### Invariantes del wrapper
-
-Nunca pasa `--dangerously-bypass-approvals-and-sandbox`,
-`--dangerously-bypass-hook-trust` ni `--ignore-rules`. Los tres desarman las
-protecciones desde la línea de comandos, sin rastro en el TOML.
-
-Los nueve roles corren en `danger-full-access` vía `sandbox_mode` declarado en
-`~/.codex/agents/<rol>.toml`, por rol, auditable y verificado por `verify.ps1`.
-Eso no es lo mismo que el flag global: el permiso es config por rol, no un
-bypass. Los roles lectores (`reviewer`, `security-reviewer`, `docs-researcher`)
-también van `danger-full-access` porque en Windows `elevated` el `read-only` no
-arranca ningún proceso hijo (error 1920); su barrera es el prompt más
-`agents.enabled=false`.
+- Nunca pisa un `settings.json` o `hooks.json` corrupto: frena y lo dice.
+- Respaldo antes de cada escritura; uninstall guiado por manifiesto.
+- No siembra `defaultMode: bypassPermissions`; no impone claves globales en
+  `~/.codex/config.toml`.
 
 ### Windows
 
-Sandbox nativo `elevated`. El wrapper corre en PowerShell 5.1 sin dependencias.
-
-Bajo `elevated`, el único `sandbox_mode` que puede ejecutar comandos es
-`danger-full-access`: tanto `workspace-write` como `read-only` fallan con
-`CreateProcessAsUserW` error 1920 al lanzar el proceso hijo. Por eso los nueve
-roles del kit se declaran `danger-full-access`. Ver `D-017`.
-
-`[sandbox_workspace_write] network_access = false` sigue declarado pero no aplica
-bajo `danger-full-access`, donde la red está abierta. Queda por si algún rol
-vuelve a `workspace-write` en un entorno sin `elevated`.
+Codex con `[windows] sandbox = "elevated"`: solo `danger-full-access` puede
+lanzar procesos (error 1920 en los otros). Por eso los roles lo declaran en su
+`.toml`, auditable, sin flags de bypass (D-017).

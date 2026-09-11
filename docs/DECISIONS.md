@@ -48,7 +48,7 @@ SYSTEM.md § 1 Contexto, § 3 Arquitectura
 
 ## D-002 — Roles de Codex deliberadamente no usados en el flujo híbrido
 
-Estado: Aceptada
+Estado: Aceptada, actualizada por D-030 (explorador/e2e/browser eliminados; tester-tdd se conserva)
 Fecha: 2026-08-21
 
 ### Contexto
@@ -85,7 +85,7 @@ SYSTEM.md § 3 Arquitectura (Roles Codex)
 
 ## D-003 — Orden del árbol de decisión y prioridad del caso trivial
 
-Estado: Aceptada
+Estado: Aceptada, actualizada por D-025 (el gate ya no depende de que el orquestador lo consulte)
 Fecha: 2026-08-21
 
 ### Contexto
@@ -124,7 +124,7 @@ SYSTEM.md § 4 Flujos críticos (Gate de presupuesto y routing)
 
 ## D-004 — Lectura de cuota real como requisito habilitante
 
-Estado: Aceptada
+Estado: Aceptada, actualizada por D-023 (la cuota de Claude se lee del stdin de la statusLine)
 Fecha: 2026-08-21
 
 ### Contexto
@@ -495,7 +495,7 @@ SYSTEM.md § 2 BR-003 · D-012 (el lead sí puede ser Sonnet; el subagente no)
 
 ## D-014 — `pwsh` 7 como runtime declarada, en vez de portar a bash
 
-Estado: Aceptada
+Estado: Reemplazada por D-020
 Fecha: 2026-08-22
 
 ### Contexto
@@ -543,7 +543,7 @@ SYSTEM.md § 2 BR-001 · INSTALL-HIBRIDO.md § 1
 
 ## D-015 — Señal de vida por tee del stream, en vez de `-Background` con registry
 
-Estado: Aceptada
+Estado: Aceptada, actualizada por D-026 (-Background ya existe: ASYNC_REVIEW)
 Fecha: 2026-08-22
 
 ### Contexto
@@ -830,3 +830,307 @@ completa cada vez que falla.
 ### Referencias
 docs/SYSTEM.md § BR-014 y § BR-015 · D-016 ·
 MEJORAR ORQUESTADOR/FEEDBACK-ORQUESTADOR.md § 4.1 · Orquestador/agents/*.md
+
+---
+
+## D-020 — Runtime Node/TypeScript sin dependencias, en lugar de PowerShell
+
+Estado: Aceptada
+Fecha: 2026-09-10
+
+### Contexto
+D-014 declaró `pwsh` 7 como runtime para portar el kit fuera de Windows. Nadie lo
+corrió fuera de Windows, y el kit seguía cargando problemas propios de
+PowerShell 5.1: quoting manual de argumentos (`ConvertTo-CmdArg`), codepage OEM,
+BOM en UTF-8, deadlocks de pipes resueltos a mano (BR-010).
+
+### Opciones consideradas
+A. Mantener `pwsh` 7 (D-014).
+B. Dos implementaciones: PowerShell para Windows y bash para POSIX.
+C. Una sola implementación en Node/TypeScript.
+
+### Decisión
+C, con cero dependencias de runtime: `node:util.parseArgs`, `node:child_process`,
+`node:test`. devDependencies: `typescript` y `@types/node`.
+
+### Motivo
+Node ya es requisito de Claude Code, Codex (se instala por npm) y codegraph: no
+agrega runtime. `spawn` con array de args elimina el quoting manual y su
+superficie de inyección; los streams de Node eliminan el deadlock de BR-010 por
+construcción. B duplica cada bug.
+
+### Consecuencias
++ Un solo código, con 103 tests, incluidos paths Windows/POSIX y shims npm.
++ `codex.cmd` se lanza sin shell: el runtime lee el shim y ejecuta `node <script>`.
+- Linux y macOS no tienen todavía una corrida real end-to-end.
+- El kit PowerShell queda en `legacy/` hasta que `orq migrate` se use en real.
+
+## D-021 — No construir un motor de orquestación
+
+Estado: Aceptada
+Fecha: 2026-09-10
+
+### Contexto
+El pedido V2 incluía fases, dependencias, paralelismo y checkpoints. Claude Code
+(v2.1.268) ya trae *dynamic workflows*: un runtime JS con `agent()`,
+`pipeline()`, `parallel()`, `phase()`, output por JSON Schema y resumabilidad.
+
+### Opciones consideradas
+A. Un motor propio de DAG/fan-out en `orq`.
+B. Política en la skill + las piezas mecánicas que el motor nativo no tiene.
+
+### Decisión
+B. `orq` aporta proveedor Codex, cuota, contratos, jobs en background con tope,
+worktrees, checkpoints, telemetría e instalación. El plan con dependencias es un
+JSON validado por un orden topológico, no un scheduler.
+
+### Motivo
+El motor nativo solo orquesta subagentes Claude y no conoce cuotas ni Codex; lo
+que falta es chico. Un scheduler propio duplicaría al nativo y empujaría hacia
+el multiagente que el V2 quiere evitar.
+
+### Consecuencias
++ Poco código; la orquestación sigue siendo criterio del razonador.
+- Un workflow nativo con muchos agentes no pasa por el gate de cuota de `orq`.
+
+## D-022 — Code intelligence: codegraph detrás de una interfaz, Serena hasta que muera el PowerShell
+
+Estado: Aceptada
+Fecha: 2026-09-10
+
+### Contexto
+Se evaluaron GitNexus, `lzehrung/codegraph` y Serena. Benchmark en scratchpad:
+sobre este repo (entonces PowerShell) codegraph indexó 24 archivos y no encontró
+`Get-CodexVerdict`; Serena lo encontró con sus 3 referencias en 1 call. Sobre un
+repo TypeScript de 841 archivos, codegraph indexó en 28 s y resolvió `symbols`,
+`refs`, `rdeps` y `affected` en 1 call cada uno, con salida compacta.
+
+### Opciones consideradas
+A. GitNexus. B. Serena. C. codegraph. D. codegraph detrás de una interfaz.
+
+### Decisión
+D. `CodeIntelProvider` de seis métodos con tres backends (codegraph, serena,
+native). codegraph pinneado (`2.3.24`) en `~/.orquestador/tools`, MCP registrado
+por `orq init` en Claude y Codex. Un motor activo por vez. Serena no se retira
+mientras el repo tenga PowerShell relevante; tras la migración se repite el
+benchmark y se decide.
+
+### Motivo
+GitNexus: licencia PolyForm-Noncommercial-1.0.0 (prohíbe uso comercial), 883
+versiones en 7 meses. codegraph: MIT, solo Node, CLI + MCP, `affected` (tests
+derivados del grafo) que Serena no tiene, sin Python/uv/LSP. Pero tiene bus
+factor 1 (un autor, 5 estrellas): la interfaz hace que cambiarlo sea una línea.
+Serena gana en precisión de referencias (LSP) y es el único que ve PowerShell.
+
+### Consecuencias
++ Instalación sin Python; funciona desde Claude, desde Codex y con `orq codeintel`.
++ `native` garantiza que nunca falta code intel.
+- Referencias por tree-sitter, no por compilador.
+- Mientras convivan, `doctor` avisa "dos motores activos".
+
+## D-023 — La cuota de Claude sale del stdin de la statusLine
+
+Estado: Aceptada
+Fecha: 2026-09-10
+
+### Contexto
+El gate leía la cuota de Claude del cache que escribe un repo PowerShell de
+terceros (ClaudeCodeStatusLine) en `$env:TEMP`. No existe `claude usage`.
+
+### Decisión
+Claude Code pasa a toda `statusLine.command` un JSON documentado con
+`rate_limits.five_hour` / `seven_day` (`used_percentage`, `resets_at`) y
+`session_id`. `orq statusline` lo persiste en `~/.orquestador/claude-usage.json`.
+
+### Consecuencias
++ Soportado, cross-platform, sin dependencias de terceros.
++ Una ventana cuyo `resets_at` pasó vale 0, no el último dato.
+- `rate_limits` solo existe en Pro/Max y después de la primera respuesta; con
+  otra statusline configurada, `init` no la pisa y el gate degrada a BALANCED.
+
+## D-024 — Telemetría reescrita, y medir también lo que no se delega
+
+Estado: Aceptada
+Fecha: 2026-09-10
+
+### Contexto
+La retro (`MEJORAR ORQUESTADOR/Mejorar.txt`) mostró un informe que afirmaba
+cosas que no pasaron. Causas raíz verificadas: sin filtro de sesión; los
+subagentes en background vuelven del tool `Agent` al lanzarse (Pre y Post en el
+mismo instante: 0 s); en Windows las suites corren por la tool `PowerShell`, que
+el matcher `Agent|Bash` no veía. SYSTEM.md decía que `SubagentStop` no trae el
+rol: hoy trae `agent_id` y `agent_type`.
+
+### Decisión
+Toda fila lleva `session_id` (hooks: del payload; CLI: `CLAUDE_CODE_SESSION_ID`).
+Subagentes apareados por `SubagentStart`/`SubagentStop` y `agent_id`. Matcher
+`Bash|PowerShell`. Nueva fila `decision` con `delegation_decision` y motivo de set
+cerrado. El informe declara cuando no hay datos de la sesión.
+
+### Motivo
+Si solo se mide lo delegado, una sesión sin delegaciones se ve igual a una donde
+el gate nunca corrió. Con `not_delegated` y `rework` en el mismo log se puede ver
+si la política DIRECT está bien calibrada.
+
+## D-025 — El gate corre en SessionStart
+
+Estado: Aceptada
+Fecha: 2026-09-10
+
+### Contexto
+"Una vez por sesión" dependía de la memoria del orquestador. En la sesión de la
+retro no corrió y nadie lo notó.
+
+### Decisión
+Hook `SessionStart`: calcula veredicto y estado, los registra (`gate`) y los deja
+en el contexto en dos líneas. Usa el cache de cuota de Codex si tiene menos de 5
+minutos; si no, RPC con 5 s de timeout.
+
+### Consecuencias
++ El orquestador nunca decide si consultarlo, solo qué hacer con la respuesta.
+- Dos líneas de contexto en toda sesión, también en repos donde no se orquesta.
+
+## D-026 — ASYNC_REVIEW con tope duro de un reviewer por tarea
+
+Estado: Aceptada
+Fecha: 2026-09-10
+
+### Contexto
+D-015 difirió `-Background` hasta que hiciera falta paralelismo real. La
+topología ASYNC_REVIEW lo necesita: el razonador sigue mientras otro proveedor
+revisa algo ya verde.
+
+### Decisión
+`orq run --background`, solo para roles read-only y con `--task` obligatorio.
+Jobs como archivos en `.orquestador/jobs/`. El runtime rechaza (exit 7) un segundo
+reviewer activo sobre la misma tarea; un job cuyo PID murió no bloquea. Subir el
+tope exige `asyncReview.maxConcurrent` explícito.
+
+### Motivo
+La topología existe para no bloquear al razonador, no para abrir otra vía de
+fan-out. Un tope en el prompt no se cumple bajo presión; uno en el runtime sí.
+
+## D-027 — Un escritor por región de archivos; worktrees solo para writers paralelos
+
+Estado: Aceptada
+Fecha: 2026-09-10
+
+### Contexto
+"Un escritor por repositorio" serializó en la retro dos unidades con conjuntos de
+archivos disjuntos.
+
+### Decisión
+Dos unidades sin archivos en común pueden escribir en paralelo. Si las dos
+escriben en el mismo repo, la segunda va en `orq worktree add` (branch
+`orq/<nombre>`, directorio hermano `<repo>.wt/`). Nunca worktree para un
+reviewer. Nunca merge automático; `remove` se niega con cambios sin commitear y
+conserva la branch si no está integrada.
+
+## D-028 — El instalador no siembra permisos peligrosos ni impone config global
+
+Estado: Aceptada
+Fecha: 2026-09-10
+
+### Contexto
+El V1 sembraba `defaultMode: bypassPermissions` y fijaba `model`,
+`approval_policy = "never"` y `sandbox_mode = "danger-full-access"` a nivel global
+en `~/.codex/config.toml`, afectando sesiones ajenas al kit. El git-guard y las
+deny rules solo cubrían la tool `Bash`.
+
+### Decisión
+No se siembra `bypassPermissions` (doctor avisa si está). En Codex solo se
+agregan roles, rules, hooks, un bloque administrado de `AGENTS.md` y MCPs
+faltantes; los roles declaran su sandbox en su `.toml` (D-017 sigue vigente).
+`migrate` nombra las claves que impuso el V1, no las revierte. Git-guard y deny
+rules cubren `Bash` y `PowerShell`.
+
+## D-029 — Engram como compatibilidad, no como core
+
+Estado: Aceptada
+Fecha: 2026-09-10
+
+### Decisión
+Ningún módulo del runtime lo usa; `init` no lo instala ni lo desinstala; los
+prompts lo consultan "si está disponible". El estado operacional vive en
+`.orquestador/`. Se revisa con datos al estabilizar el V2 (ROADMAP).
+
+## D-030 — Rutas G/H y roles Codex sin uso, fuera
+
+Estado: Aceptada
+Fecha: 2026-09-10
+
+### Contexto
+Las rutas G y H delegaban a `$constructor` / `$revisor-completo`, orquestadores
+completos de Codex con fan-out por defecto: contradicen "un solo razonador" y no
+tienen ni un uso registrado. `explorador`, `e2e-browser` y `browser-diagnostics`
+de Codex ya estaban declarados sin uso (D-002).
+
+### Decisión
+Se eliminan del kit (`orq migrate` los retira con respaldo). `tester-tdd` se
+conserva: es el RED independiente cuando el razonador es Codex. Los `.toml`
+restantes pierden el slug de modelo fijo y los bloques MCP con `cmd /c`.
+
+### Referencias
+SYSTEM.md § 3 · ROADMAP.md Fase 4 · CHANGELOG 2.0.0-rc.1
+
+## D-031 — git-guard por parser, no por regex
+
+Estado: Aceptada
+Fecha: 2026-09-10
+
+### Contexto
+El review adversarial de Codex sobre el V2 mostró que la regex heredada del V1
+tenía falsos negativos reales (`git --no-pager push`, `git -c k="A B" push`,
+`-C` con espacios en argv) y falsos positivos (`echo git push`, mensajes de
+commit). En esta misma sesión el guard V1 bloqueó un heredoc que solo *mencionaba*
+la frase.
+
+### Opciones consideradas
+A. Ampliar la regex. B. Parser de línea de comandos mínimo.
+
+### Decisión
+B (`src/core/guard.ts`): tokeniza respetando comillas, separa por `; & | 
+`,
+busca `git` en posición de comando (después de asignaciones y wrappers como
+`sudo`/`env`), saltea las opciones globales de git y compara el subcomando.
+Recorre lo que se ejecuta indirectamente: `bash -c`, `pwsh -Command`, `cmd /c`,
+`iex`, `$(…)`, backticks, y `-c alias.x=push`.
+
+### Motivo
+Una regex no puede distinguir posición de comando de texto dentro de un
+argumento: o se le escapan formas válidas o bloquea texto inerte. Es una frontera
+de seguridad: no se simplifica.
+
+### Consecuencias
++ 44 formas bloqueadas y 12 textos inertes que pasan, con test (el segundo review
+  sumó agrupaciones, `if/while`, wrappers como `sudo`/`env`/`nohup`/`Start-Process`,
+  escapes `g\it`/`` g`it `` y ejecutables indirectos `$g`, `${GIT}`, `$(which git)`).
+- Un alias de git definido en la config del usuario (`git p` → push) no se ve.
+  Lo cubren las otras capas (D-008).
+
+
+## D-032 — Serena deprecada: codegraph es el único motor de code intel
+
+### Contexto
+D-022 dejaba a Serena viva hasta que se retirara el PowerShell. El V1 quedó
+migrado (`orq migrate`, 2026-09-10), el repo ya es TypeScript y Serena estaba
+configurada solo con el language server de PowerShell. codegraph resolvió las 6
+tareas del benchmark de D-022.
+
+### Opciones consideradas
+A. Mantener Serena como backend opcional. B. Retirarla.
+
+### Decisión
+B. Se quita el MCP de Claude y de Codex, el backend `serena` de
+`CodeIntelProvider`, el chequeo "code intel duplicado" de `orq doctor` y
+`.serena/` del repo. Quedan `codegraph` y `native` (fallback git).
+
+### Motivo
+Un solo motor evita el aviso permanente de duplicado y el costo de Python/uv/LSP
+para una herramienta que ya no ve el código del repo.
+
+### Consecuencias
++ Menos superficie: un backend menos, sin dependencia de Python.
+- Se pierde la precisión LSP en referencias; `orq codeintel refs` usa el grafo de
+  codegraph. Si hiciera falta, `CodeIntelProvider` permite volver a sumar un backend.
+- Un `orq.config.json` con `"codeIntel": "serena"` cae a codegraph sin error.

@@ -1,2 +1,7 @@
-# Log local de decisiones del orquestador (maquina-local, no versionado).
+# Estado operacional del orquestador en el repo (maquina-local, no versionado).
 .orquestador/
+# Indice de code intelligence (codegraph).
+.codegraph/
+# Build y dependencias.
+node_modules/
+dist/

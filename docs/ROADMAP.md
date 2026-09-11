@@ -69,14 +69,18 @@ Estado: IN_PROGRESS. Ver
   Resuelto el 2026-08-22: todos los umbrales de presupuesto y de capacidad son
   constantes nombradas en el bloque de política, y los seis están fijados por
   mutación (mover cualquiera pone la suite en RED).
-- El wrapper no rechaza explícitamente los flags de bypass: simplemente nunca
+- ~~El wrapper no rechaza explícitamente los flags de bypass.~~ Resuelto en V2:
+  `assertNoBypass` los rechaza antes de lanzar Codex (con test). Texto original:
+  el wrapper no los rechazaba: simplemente nunca
   los incluye. No hay guard si alguien los agregara.
-- **Linux y macOS no están probados** (`D-014`). El kit declara `pwsh` 7 como
+- **Linux y macOS no están probados** (`D-014`, reemplazada por D-020: el V2 es
+  Node y la suite pasa en Windows; sigue faltando la corrida real en POSIX, Fase 4). El kit declara `pwsh` 7 como
   runtime y se neutralizaron los seis puntos que asumían Windows, pero nadie corrió
   el instalador, el hook, la statusline ni las suites fuera de Windows. Además el
   cache de cuota de Claude lo escribe upstream con `$env:TEMP`, que fuera de
   Windows no existe: esa mitad del gate degradaría a `BALANCED`.
-- Los respaldos del instalador se acumulan sin límite, un directorio por corrida en
+- ~~Los respaldos se acumulan sin límite~~ — resuelto en V2 (retención de 5).
+  Texto original: los respaldos del instalador se acumulaban sin límite, un directorio por corrida en
   `~/.claude/orquestador-backups/`. Nada los borra.
 
 ## Fase 2.6 — Delegación selectiva y observabilidad del lado Claude
@@ -138,7 +142,8 @@ Estado: IN_PROGRESS. Nace del uso real documentado en
 
 ## Fase 3 — Observabilidad de Codex e instalador
 
-Estado: TODO. Investigado el 2026-08-21 contra `codex-cli 0.149.0`.
+Estado: SUPERADA por la Fase 4 (V2). Investigado el 2026-08-21 contra `codex-cli 0.149.0`;
+reverificado el 2026-09-10 contra `0.153.4`: el daemon sigue siendo solo Unix.
 
 ### Hallazgo que condiciona todo
 
@@ -155,7 +160,9 @@ Windows, deja obsoleto el registry propio de abajo.
       Resuelve el problema que motivaba el registry —saber si Codex sigue vivo—
       sin tocar el protocolo de delegación.
 
-- [ ] **Registry de jobs + `-Background` en `codex-run.ps1`.** Diferido a
+- [x] **Registry de jobs + `-Background`** — hecho en V2 como ASYNC_REVIEW
+      (`orq run --background`, `.orquestador/jobs/`, tope 1 por tarea; D-026).
+      Nota original: Diferido a
       propósito (`D-015`): el wrapper sigue bloqueando. Lo que faltaba era la
       señal de vida, ya cubierta arriba; `-Background` solo hace falta el día que
       moleste no poder seguir hablando con Claude mientras Codex trabaja, o que
@@ -164,7 +171,8 @@ Windows, deja obsoleto el registry propio de abajo.
       que los tabule.
       Referencia de diseño: `openai/codex-plugin-cc`, `scripts/lib/state.mjs` y
       `scripts/lib/tracked-jobs.mjs` (jobs dir por workspace, hash del root).
-- [ ] **Contador de jobs en la statusline.** Depende del registry, o sea de
+- [ ] **Contador de jobs en la statusline.** Sigue sin hacer: con tope 1 por
+      tarea no hay una cola que contar; `orq jobs` alcanza. Nota original: Depende del registry, o sea de
       `-Background`: con el wrapper bloqueante nunca hay más de un job. El
       segmento de cuota `CX <n>%` y el de actividad `CX> <rol> …` ya están en
       `statusline-wrapper.ps1`.
@@ -193,7 +201,7 @@ Windows, deja obsoleto el registry propio de abajo.
   resuelve un `git ls-files` filtrado por manifests, documentado en la Fase 2 de
   la skill. El cache es la parte que se rompe sola. Se promueve a script solo si
   se comprueba que se paga en cada sesión.
-- **`metrics.ps1`.** Los campos ya están en `decisions.jsonl`; el agregador es un
+- **`metrics.ps1`.** (En V2 es `orq metrics`, con filtro por sesión.) Los campos ya están en `decisions.jsonl`; el agregador es un
   `Group-Object` de una línea. Se escribe cuando haya ~25 tareas que agregar.
 - **Paralelismo real de writers y metadata de workstreams** (`size`, `coupling`,
   `risk`). Sin aislamiento por `git worktree` es corrupción esperando, y sin
@@ -224,3 +232,46 @@ creados (openai/codex#15165, sin fix upstream). Es la misma raíz que el error 1
 que rompía a `constructor` y `tester-tdd`. Workaround de la época:
 `icacls ".\.venv" /reset /T /C /Q` una vez por repo. Pasar a `unelevated` NO era
 solución: rompe `apply_patch` con split roots (openai/codex#32168, #32314).
+
+## Fase 4 — Orquestador V2 (runtime Node)
+
+Estado: IN_PROGRESS. Ver [D-020](DECISIONS.md) a D-030 y CHANGELOG 2.0.0-rc.1.
+
+- [x] Runtime `orq` en Node/TypeScript, sin dependencias de runtime; 103 tests
+- [x] `init` / `doctor` / `uninstall` / `migrate` deterministas, idempotentes, con manifiesto
+- [x] Gate automático en `SessionStart` (P1 de la retro)
+- [x] Cuota de Claude desde el stdin de la statusLine; fuera ClaudeCodeStatusLine
+- [x] Telemetría por sesión, subagentes por `SubagentStart`/`Stop`, suites por
+      PowerShell, `delegation_decision`, veredicto de findings (P0 de la retro)
+- [x] Topologías, ASYNC_REVIEW con tope, worktrees, checkpoints, planes con dependencias
+- [x] `CodeIntelProvider` con codegraph / serena / native
+- [x] Skill recortada (395 → 265 líneas), escritor por región, ejercitar la app real
+- [x] Base de la skill de Codex como razonador
+- [x] **Migrar esta máquina**: `orq migrate` sobre el home real y una sesión nueva
+      de Claude Code que muestre el gate en el contexto y un `orq metrics` fiel.
+- [ ] **Corrida real en Linux y macOS** (instalar, doctor, una sesión, uninstall).
+- [ ] **`npm publish`** — solo con la verificación end-to-end completa (INSTALL.md).
+- [x] **Decidir Serena**: retirada, codegraph es el único motor (D-032).
+- [ ] **Completar la skill de Codex** (`kit/codex/skills/orquestador`, sección
+      "Pendiente"): mapear topologías a subagentes nativos; verificar en uso que las
+      tareas triviales terminan sin ningún subagente. La hace Codex.
+- [ ] **Recalibrar con datos**: después de ~25 tareas, `orq metrics --all` —
+      umbrales 50/70/80 (BR-003), cuántas `not_delegated` terminaron en `rework`,
+      tasa de findings aceptados por rol (¿el reviewer encuentra bugs reales?).
+- [ ] **Revisar Engram** (D-029): si en N sesiones `mem_search` no cambió ninguna
+      decisión, se retira de los prompts.
+- [ ] **Caveman**: solo si la telemetría muestra output narrativo inútil medible.
+- [ ] Borrar `legacy/` cuando `orq migrate` se haya usado en real sin problemas.
+
+### Deuda conocida
+
+- `test_run.result` sigue saliendo de firmas de texto cuando el payload no trae
+  exit code: un runner con otro formato puede dar un falso GREEN (métrica perdida,
+  nunca fallo).
+- El `task` de un subagente se asocia por orden (FIFO por tipo); con spawns
+  paralelos del mismo tipo el texto puede cruzarse. La duración no (va por `agent_id`).
+- codegraph tiene bus factor 1; está pinneado y detrás de `CodeIntelProvider`.
+- Un workflow nativo de Claude Code (dynamic workflows) no pasa por el gate de cuota.
+- El hook `SessionStart` agrega dos líneas de contexto también en repos donde no
+  se orquesta.
+
