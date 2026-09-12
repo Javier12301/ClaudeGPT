@@ -20,6 +20,11 @@ correspondiente de [`docs/SYSTEM.md`](docs/SYSTEM.md) en el mismo diff.
 
 ### Fixed
 
+- Windows: los hooks y la statusline ya no muestran una consola al
+  ejecutarse. `orq init` los rutea a través de `orq-hidden.exe` (launcher
+  nativo Win32, subsistema GUI, `CreateProcessW` + `CREATE_NO_WINDOW`,
+  handles de stdin/stdout/stderr heredados directo, sin relay) en vez de
+  invocar `node` directo. POSIX/macOS/WSL no cambian (D-034).
 - Windows: `orq init` no encontraba `npm` y no instalaba codegraph. El
   `npm.cmd` del instalador de Node no usa el formato cmd-shim; `parseNpmShim`
   ahora reconoce los dos.

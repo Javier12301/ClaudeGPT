@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   mergeClaudeSettings, unmergeClaudeSettings, mergeCodexHooks, unmergeCodexHooks,
-  mergeAgentsBlock, unmergeAgentsBlock, DENY,
+  mergeAgentsBlock, unmergeAgentsBlock, orqCmd, DENY,
 } from '../src/install/merge.ts'
 
 const ctx = { runtimeCli: 'C:/Users/u/.orquestador/runtime/dist/cli.js' }
@@ -172,4 +172,28 @@ test('AGENTS.md: bloque administrado idempotente y removible', () => {
 
 test('DENY solo incluye formas que la deny rule sabe matchear', () => {
   assert.ok(DENY.every(d => /^(Bash|PowerShell)\(git(\.exe)? push \*\)$/.test(d)))
+})
+
+test('orqCmd sin launcherExe (POSIX/hoy): sin cambios', () => {
+  assert.equal(orqCmd(ctx, 'statusline'), `node "${ctx.runtimeCli}" statusline`)
+  assert.equal(orqCmd(ctx, 'hook session-start'), `node "${ctx.runtimeCli}" hook session-start`)
+})
+
+test('orqCmd con launcherExe (Windows): rutea via el launcher sin consola', () => {
+  const winCtx = { runtimeCli: ctx.runtimeCli, launcherExe: 'C:/Users/u/.orquestador/runtime/dist/native/orq-hidden.exe', nodeExe: 'C:/Program Files/nodejs/node.exe' }
+  assert.equal(
+    orqCmd(winCtx, 'statusline'),
+    `"${winCtx.launcherExe}" "${winCtx.nodeExe}" "${winCtx.runtimeCli}" statusline`,
+  )
+})
+
+test('orqCmd con launcherExe: sigue conteniendo el marcador de runtime (isOurs lo sigue reconociendo)', () => {
+  const winCtx = { runtimeCli: ctx.runtimeCli, launcherExe: 'C:/Program Files/orq/orq-hidden.exe', nodeExe: 'C:/Program Files/nodejs/node.exe' }
+  const { doc } = mergeClaudeSettings({}, winCtx)
+  assert.equal(doc.statusLine.command, `"${winCtx.launcherExe}" "${winCtx.nodeExe}" "${winCtx.runtimeCli}" statusline`)
+  // idempotencia y uninstall siguen andando con el string wrapeado (rutas con espacios incluidas).
+  const twice = mergeClaudeSettings(doc, winCtx).doc
+  assert.deepEqual(twice, doc)
+  const { report } = mergeClaudeSettings({}, winCtx)
+  assert.deepEqual(unmergeClaudeSettings(doc, report.seeded, report.addedPerms).hooks, undefined)
 })

@@ -64,6 +64,20 @@ export class Tx {
     return true
   }
 
+  // Igual que write, pero para binarios (ej. orq-hidden.exe): comparar/escribir
+  // como texto corrompe bytes que no son UTF-8 valido.
+  writeBinary(file: string, content: Buffer): boolean {
+    let current: Buffer | null = null
+    try { current = readFileSync(file) } catch { /* no existe */ }
+    if (current && current.equals(content)) return false
+    this.changes.push(`${current == null ? 'crear' : 'actualizar'} ${file}`)
+    if (this.dryRun) return true
+    this.backup(file)
+    mkdirSync(path.dirname(file), { recursive: true })
+    writeFileSync(file, content)
+    return true
+  }
+
   remove(target: string): boolean {
     if (!existsSync(target)) return false
     this.changes.push(`borrar ${target}`)
@@ -79,7 +93,9 @@ export class Tx {
     const written: string[] = []
     for (const f of listFiles(src)) {
       const target = path.join(dst, path.relative(src, f))
-      this.write(target, readFileSync(f, 'utf8'))
+      // Buffer, no texto: dist/ puede traer binarios (ej. orq-hidden.exe) y
+      // leerlos/escribirlos como utf8 los corrompe.
+      this.writeBinary(target, readFileSync(f))
       written.push(target)
     }
     if (exact) for (const f of listFiles(dst)) if (!written.includes(f)) this.remove(f)

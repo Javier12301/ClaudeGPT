@@ -1172,3 +1172,72 @@ pertenezcan.
 + Codex standalone y Claude usan las mismas fuentes durables del proyecto.
 - V2 no administra ni limpia una instalación global heredada del V1; el usuario
   puede mantenerla para otros proyectos.
+
+## D-034 — Launcher nativo Win32 para que los hooks no muestren consola en Windows
+
+Estado: Aceptada
+Fecha: 2026-09-12
+
+### Contexto
+
+En Windows, cada hook y cada lectura de la statusLine hacen parpadear una
+ventana de consola: Claude Code/Codex leen el comando de `settings.json`
+(`node "<runtime>/dist/cli.js" <sub>`, armado por `orqCmd` en
+`src/install/merge.ts`) y lo spawnean ellos mismos, fuera de este repo.
+`node.exe` es un binario de subsistema consola; cuando el host lo lanza sin
+consola propia adjunta (típico si Claude Code corre en segundo plano —
+coincide con que el usuario lo note en medio de una reunión o video), Windows
+le crea una consola nueva y la muestra un instante. `windowsHide: true` en
+`src/core/proc.ts` no alcanza: solo cubre los procesos que este runtime
+lanza con su propio `run()`, nunca el spawn que hace el host a partir del
+string de `settings.json`.
+
+### Opciones consideradas
+
+A. Wrapper interpretado (`wscript.exe` + VBScript) que relaya stdin/stdout/
+   stderr a mano. Funciona (WSH es subsistema GUI), pero exige un loop de
+   pump manual con riesgo de deadlock de buffer y de mangle de encoding —
+   los bytes pasan por la capa de texto del script.
+B. Launcher nativo Win32 (`/target:winexe`) que llama `CreateProcessW` con
+   `CREATE_NO_WINDOW` y pasa los handles de stdin/stdout/stderr del host
+   directo al hijo (duplicados como heredables, herencia restringida vía
+   `STARTUPINFOEX` + `PROC_THREAD_ATTRIBUTE_HANDLE_LIST`). Cero relay, cero
+   copia de bytes: el contrato de pipes del hook queda intacto por
+   construcción, no por cuidado del wrapper.
+C. Requerir un compilador de C/C++ (MSVC Build Tools o MinGW) para B. Ninguno
+   de los dos estaba instalado en la máquina de desarrollo.
+
+### Decisión
+
+B, implementado en C# (`native/orq-hidden/orq-hidden.cs`) vía P/Invoke sobre
+las mismas APIs Win32 — el binario resultante es un PE nativo con subsistema
+GUI, indistinguible en comportamiento de uno compilado en C — compilado con
+`csc.exe`, que viene incluido en Windows como parte de .NET Framework 4.x
+(sin instalar nada nuevo, a diferencia de la opción C). `orqCmd` rutea el
+comando a través de `orq-hidden.exe` solo en Windows (`ctx.launcherExe`);
+POSIX/macOS/WSL siguen invocando `node` directo, sin cambios.
+
+`csc.exe` es dependencia de **build** (la máquina donde corre
+`npm run build`/se genera el release), nunca de **runtime**: `orq init` en
+la máquina del usuario final copia el `.exe` ya compilado, no compila nada.
+El `.cs` vive en el repo; el `.exe` es artefacto de build bajo `dist/`
+(gitignored), reproducible con una línea de `csc.exe` — ver
+`scripts/build-launcher.mjs`. El binario se compila `AnyCPU`, no `x64`: el
+mismo PE corre vía JIT tanto en Windows x64 como ARM64 sin builds separados.
+
+### Consecuencias
+
++ Windows no vuelve a mostrar consola en hooks/statusline, sin degradar
+  ninguno (`git-guard`, `session-start`, `metrics` siguen intactos).
++ Sin dependencia nueva de build ni de runtime: `csc.exe` ya viene con
+  Windows; el usuario final no necesita compilar nada.
++ Contrato de pipes robusto por diseño: al no relayar bytes, no hay superficie
+  para deadlock de buffer ni mangle de encoding.
+- Si el día de mañana se publica el paquete a npm, `npm run build` va a tener
+  que correr en una máquina/CI Windows (o cross-compilar con el SDK de
+  `dotnet`) antes de `npm publish`, para que el `.exe` viaje ya compilado
+  dentro de `dist/`. No resuelto en este trabajo, solo anotado.
+- Sigue existiendo una dependencia externa no verificable: si Claude Code
+  spawnea el string de `settings.json` a través de un shell (`cmd.exe /c`)
+  en vez de exec directo del primer token, ningún contenido del string lo
+  arregla — sería un bug del lado del host, fuera de este repo.

@@ -25,6 +25,11 @@ const CONTEXT7_URL = 'https://mcp.context7.com/mcp'
 
 export const runtimeDir = () => path.join(orqHome(), 'runtime')
 export const runtimeCli = () => path.join(runtimeDir(), 'dist', 'cli.js').replaceAll('\\', '/')
+// Windows: launcher sin consola para hooks/statusline (ver docs/DECISIONS.md D-034).
+// Vive dentro de dist/ (lo compila scripts/build-launcher.mjs) asi el copyTree
+// de mas abajo ya lo instala solo, sin un paso especial.
+export const launcherExe = () => path.join(runtimeDir(), 'dist', 'native', 'orq-hidden.exe').replaceAll('\\', '/')
+const launcherSrc = () => path.join(PKG_ROOT, 'dist', 'native', 'orq-hidden.exe')
 export const manifestFile = () => path.join(orqHome(), 'manifest.json')
 const toolsDir = () => path.join(orqHome(), 'tools')
 export const codegraphCli = () => path.join(toolsDir(), 'node_modules', '@lzehrung', 'codegraph', 'dist', 'bin', 'cli.js')
@@ -90,6 +95,9 @@ export function preflight(): string | null {
   if (!nodeOk()) return `Node ${process.versions.node}: se requiere >= ${MIN_NODE.join('.')}.`
   if (!which('git')) return 'Falta git en el PATH.'
   if (!existsSync(path.join(PKG_ROOT, 'dist', 'cli.js'))) return 'Falta dist/: corre `npm run build` antes de `orq init`.'
+  if (process.platform === 'win32' && !existsSync(launcherSrc())) {
+    return 'Falta dist/native/orq-hidden.exe: corre `npm run build` (necesita csc.exe / .NET Framework 4.x, incluido de fabrica en casi todo Windows) antes de `orq init`. Sin el, los hooks en Windows mostrarian consola.'
+  }
   for (const file of [path.join(claudeHome(), 'settings.json'), path.join(codexHome(), 'hooks.json')]) {
     const r = readJsonStrict(file)
     if (!r.ok) return `${r.error}\nCorregilo a mano (o restaura un backup) y volve a correr.`
@@ -125,7 +133,8 @@ async function install(o: InitOptions, partial: { m: Manifest | null }): Promise
     addedPerms: prev?.addedPerms ?? [], replaced: prev?.replaced ?? {},
     mcp: { claude: prev?.mcp.claude ?? [], codex: prev?.mcp.codex ?? [] }, codeIntel: prev?.codeIntel ?? 'none', codex: false }
   partial.m = m
-  const ctx = { runtimeCli: runtimeCli() }
+  const isWin = process.platform === 'win32'
+  const ctx = { runtimeCli: runtimeCli(), launcherExe: isWin ? launcherExe() : null, nodeExe: isWin ? process.execPath.replaceAll('\\', '/') : null }
   let codexHooksChanged = false
   const prevFiles = new Set(prev?.files ?? [])
   // Un archivo que existe y no es nuestro (no estaba en el manifiesto anterior):

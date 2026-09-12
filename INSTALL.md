@@ -14,6 +14,15 @@ archivos de MCP a mano, ni pedirle a un modelo que "investigue cómo instalar".
 
 Nunca se usa API key para Codex: cambiaría el modelo de facturación.
 
+**Windows, solo para compilar desde código fuente** (mientras no hay release
+en npm): `npm run build` compila además `orq-hidden.exe` (launcher sin
+consola para hooks/statusline, D-034) con `csc.exe`, incluido de fábrica en
+Windows como parte de .NET Framework 4.x — no hace falta instalar nada. Si
+falta (Windows recortado/Server Core), `npm run build` avisa y sigue; `orq
+init` va a frenar hasta que se compile. Es dependencia de build únicamente:
+quien solo *usa* `orq` en Windows recibe el `.exe` ya compilado, nunca
+necesita un compilador.
+
 ## Instalar
 
 ```bash
@@ -168,3 +177,10 @@ sandbox efectivo de sólo lectura. Para `reviewer`, `security-reviewer` y
 
 **Linux/macOS.** La lógica es la misma, pero todavía no hay una corrida real
 end-to-end fuera de Windows (ROADMAP). Reportá lo que encuentres con `orq doctor --json`.
+El launcher sin consola (D-034) es Windows-only y no toca el comando de hooks/
+statusline en POSIX: nada nuevo que verificar ahí.
+
+**`orq init` dice que falta `dist/native/orq-hidden.exe`.** Corré `npm run
+build` en Windows con `csc.exe` disponible (viene con .NET Framework 4.x,
+casi siempre presente; si falta, activar ".NET Framework 3.5" en "Activar o
+desactivar características de Windows").

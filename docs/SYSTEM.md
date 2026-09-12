@@ -375,6 +375,7 @@ flowchart TD
 | `src/commands/*` | `run`, `hook`, `statusline`, `install`, `checkpoint`, `worktree`, `codeintel` |
 | `src/install/merge.ts` · `files.ts` | Merges puros e inversos; escritura con respaldo |
 | `kit/` | Skills, agents, roles Codex, rules, `AGENTS.md` |
+| `native/orq-hidden/` · `scripts/build-launcher.mjs` | Launcher Win32 sin consola para hooks/statusLine (solo Windows, D-034) |
 
 ### Roles Codex
 
@@ -513,6 +514,25 @@ Claude, cuota de Codex (cache, refresco desacoplado cada 60 s) y `CX> <rol>
 `orq init` registra con los CLIs (`claude mcp add --scope user`, `codex mcp add`)
 lo que falte: `context7` (HTTP) y `codegraph`. Chrome DevTools MCP no se instala
 por defecto.
+
+### Windows — hooks y statusLine sin consola (D-034)
+
+Claude Code/Codex spawnean el comando de `settings.json`/`hooks.json` ellos
+mismos, fuera de este repo. En Windows, `orqCmd` (`src/install/merge.ts`) lo
+rutea a través de `orq-hidden.exe` en vez de invocar `node` directo:
+`"<runtime>/dist/native/orq-hidden.exe" "<node.exe>" "<runtime>/dist/cli.js" <sub>`.
+El launcher (`native/orq-hidden/orq-hidden.cs`, compilado `/target:winexe`
+con `csc.exe` — dependencia de build, no de runtime, incluida de fábrica en
+Windows) es subsistema GUI: Windows nunca le crea consola, sin importar cómo
+lo spawnee el host. Llama `CreateProcessW` con `CREATE_NO_WINDOW` pasando los
+mismos handles de stdin/stdout/stderr del host al hijo (duplicados como
+heredables vía `DuplicateHandle`, herencia restringida con
+`PROC_THREAD_ATTRIBUTE_HANDLE_LIST`) — cero relay, cero copia de bytes.
+`scripts/build-launcher.mjs` lo compila como parte de `npm run build`, solo
+en Windows; en POSIX es un no-op. **En Linux/macOS/WSL `orqCmd` no cambia**:
+sigue siendo `node "<runtime>/dist/cli.js" <sub>` como siempre, sin ningún
+launcher de por medio (esa mitad no tiene el bug: `node.exe` en Windows es
+subsistema consola, el binario `node` de POSIX no tiene ese concepto).
 
 ---
 

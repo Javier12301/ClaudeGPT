@@ -11,6 +11,9 @@ No maximiza agentes activos. Maximiza calidad, throughput útil y ahorro del
 output del modelo caro.
 
 - Windows, Linux, macOS y WSL con la misma lógica (Node ≥ 22.16).
+- Windows: hooks y statusline corren sin mostrar una consola (launcher nativo
+  sin consola, [`docs/DECISIONS.md` D-034](docs/DECISIONS.md)). En
+  Linux/macOS/WSL no cambia nada: siempre corrieron sin ese problema.
 - Cero dependencias de runtime.
 - Instalación, diagnóstico, actualización y desinstalación deterministas.
 - Degrada solo: sin Codex, modo Claude-solo; sin codegraph, `git` como code intel.

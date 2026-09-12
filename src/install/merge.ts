@@ -14,9 +14,21 @@ export const LEGACY_MARK = /(?:^|[\\/])\.claude[\\/](?:hooks[\\/](?:git-guard|or
 type Json = Record<string, any>
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x ?? {}))
 
-export interface Ctx { runtimeCli: string } // ruta absoluta a dist/cli.js del runtime, con '/'
+export interface Ctx {
+  runtimeCli: string // ruta absoluta a dist/cli.js del runtime, con '/'
+  // Windows: ruta absoluta a orq-hidden.exe y al node.exe en uso, o
+  // null/ausente en POSIX. Cuando estan seteados, orqCmd rutea el comando a
+  // traves del launcher para que Windows no le muestre consola al host
+  // (ver docs/DECISIONS.md D-034). Se resuelven en install.ts, no aca:
+  // merge.ts se mantiene puro (sin leer process.execPath/plataforma).
+  launcherExe?: string | null
+  nodeExe?: string | null
+}
 
-export const orqCmd = (ctx: Ctx, sub: string) => `node "${ctx.runtimeCli}" ${sub}`
+export const orqCmd = (ctx: Ctx, sub: string) =>
+  ctx.launcherExe
+    ? `"${ctx.launcherExe}" "${ctx.nodeExe}" "${ctx.runtimeCli}" ${sub}`
+    : `node "${ctx.runtimeCli}" ${sub}`
 const isOurs = (cmd: unknown) => typeof cmd === 'string' && (cmd.includes(RUNTIME_MARK) || LEGACY_MARK.test(cmd))
 const hookIsOurs = (h: Json) => isOurs(h?.command) || isOurs(h?.commandWindows)
 // Saca nuestros hooks uno por uno: un hook del usuario que quedo en el mismo
