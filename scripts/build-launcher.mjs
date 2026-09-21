@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-// Compila native/orq-hidden/orq-hidden.cs a dist/native/orq-hidden.exe con
+// Compila native/orq-hidden/orq-hidden.cs a dist/native/orq-hidden.exe y copia
+// el mismo PE como bash.exe (modo proxy segun argv[0]) con
 // csc.exe (viene incluido en Windows como parte de .NET Framework 4.x: no
 // agrega dependencia nueva). Solo aplica a Windows -- en otros SO es un
-// no-op, el launcher no tiene sentido ahi. Ver docs/DECISIONS.md D-034.
-import { existsSync, mkdirSync } from 'node:fs'
+// no-op, el launcher no tiene sentido ahi. Ver D-034/D-035.
+import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -14,6 +15,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const SRC = path.join(ROOT, 'native', 'orq-hidden', 'orq-hidden.cs')
 const OUT_DIR = path.join(ROOT, 'dist', 'native')
 const OUT = path.join(OUT_DIR, 'orq-hidden.exe')
+const BASH_OUT = path.join(OUT_DIR, 'bash.exe')
 
 const CSC_CANDIDATES = [
   'csc.exe',
@@ -41,4 +43,6 @@ if (r.status !== 0) {
   console.error('orq-hidden.exe: fallo la compilacion.')
   process.exit(1)
 }
+copyFileSync(OUT, BASH_OUT)
 console.log(`orq-hidden.exe compilado en ${OUT}`)
+console.log(`proxy Git Bash compilado en ${BASH_OUT}`)

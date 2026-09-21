@@ -1,5 +1,6 @@
 // orq-hidden: launcher Win32 sin consola para los hooks/statusline de orq en
-// Windows. Ver docs/DECISIONS.md D-034 para el porque.
+// Windows. Como bash.exe oculta además el shell primario que Claude Code
+// antepone a todo hook/statusline. Ver D-034/D-035.
 //
 // Arquitectura: Claude Code/Codex spawnean este .exe (compilado /target:winexe,
 // subsistema GUI -> Windows nunca le crea consola, sin importar como lo spawneen).
@@ -13,8 +14,11 @@
 // Uso: orq-hidden.exe <exe-a-lanzar> <arg1> <arg2> ...
 // El primer argumento es la ruta absoluta al ejecutable real (ej. node.exe);
 // el resto son sus argumentos. Se propaga el exit code exacto del hijo.
+// Como bash.exe: toma el ejecutable real de ../../bash-target.txt y todos los
+// argumentos recibidos pertenecen a Git Bash.
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -115,14 +119,42 @@ internal static class Program
 
     private static int Main(string[] args)
     {
-        if (args.Length < 1)
+        string ownName = Path.GetFileName(Environment.GetCommandLineArgs()[0]);
+        bool bashMode = string.Equals(ownName, "bash.exe", StringComparison.OrdinalIgnoreCase);
+        if (!bashMode && args.Length < 1)
         {
             Console.Error.WriteLine("orq-hidden: falta el ejecutable a lanzar.");
             return 1;
         }
 
-        string appPath = args[0];
-        StringBuilder commandLine = new StringBuilder(BuildCommandLine(args));
+        string appPath;
+        string[] childArgs;
+        if (bashMode)
+        {
+            string targetFile = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "bash-target.txt"));
+            try { appPath = File.ReadAllText(targetFile).Trim(); }
+            catch (Exception e)
+            {
+                Console.Error.WriteLine("orq-hidden: no se pudo leer " + targetFile + ": " + e.Message);
+                return 1;
+            }
+            if (appPath.Length == 0 || !File.Exists(appPath))
+            {
+                Console.Error.WriteLine("orq-hidden: Git Bash real no existe: " + appPath);
+                return 1;
+            }
+            childArgs = args;
+        }
+        else
+        {
+            appPath = args[0];
+            childArgs = new string[args.Length - 1];
+            Array.Copy(args, 1, childArgs, 0, childArgs.Length);
+        }
+        string[] commandArgs = new string[childArgs.Length + 1];
+        commandArgs[0] = appPath;
+        Array.Copy(childArgs, 0, commandArgs, 1, childArgs.Length);
+        StringBuilder commandLine = new StringBuilder(BuildCommandLine(commandArgs));
 
         // Los handles que el host (Claude Code/Codex) ya nos paso. No asumimos que
         // ya son heredables: se duplican con bInheritHandle=true para garantizarlo

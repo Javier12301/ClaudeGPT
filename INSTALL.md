@@ -15,8 +15,8 @@ archivos de MCP a mano, ni pedirle a un modelo que "investigue cómo instalar".
 Nunca se usa API key para Codex: cambiaría el modelo de facturación.
 
 **Windows, solo para compilar desde código fuente** (mientras no hay release
-en npm): `npm run build` compila además `orq-hidden.exe` (launcher sin
-consola para hooks/statusline, D-034) con `csc.exe`, incluido de fábrica en
+en npm): `npm run build` compila además `orq-hidden.exe` y el proxy `bash.exe`
+(launchers sin consola para hooks/statusline, D-034/D-035) con `csc.exe`, incluido de fábrica en
 Windows como parte de .NET Framework 4.x — no hace falta instalar nada. Si
 falta (Windows recortado/Server Core), `npm run build` avisa y sigue; `orq
 init` va a frenar hasta que se compile. Es dependencia de build únicamente:
@@ -45,7 +45,8 @@ Cuando se publique: `npx orquestador init`.
    (`SessionStart`, git-guard, métricas), deny rules de `git push` en Bash y
    PowerShell, statusline de `orq`. **No** pisa claves ajenas ni siembra
    `bypassPermissions`. Si ya tenés otra statusline, no la toca (el gate no verá
-   la cuota de Claude y lo avisa).
+   la cuota de Claude y lo avisa). En Windows configura un proxy GUI reversible
+   mediante `CLAUDE_CODE_GIT_BASH_PATH`, que también cubre hooks de plugins.
 4. Con sesión ChatGPT de Codex: roles en `~/.codex/agents/`, rules, git-guard en
    `hooks.json`, bloque administrado en `~/.codex/AGENTS.md`, skill base en
    `~/.agents/skills/orquestador/`.
@@ -129,6 +130,7 @@ instalar. Los respaldos se conservan.
 | hooks V1 · instalación V1 | Restos PowerShell | `orq migrate` |
 | git-guard PowerShell | El guard cubre la tool `PowerShell` | `orq init` |
 | statusline | Es la de `orq` | Sin ella el gate no ve la cuota de Claude |
+| shell Claude oculto (Windows) | Proxy y Git Bash real presentes | `orq init` |
 | permisos | `bypassPermissions` activo | Decisión tuya; `orq` no lo necesita |
 | cuota Claude | Hay una lectura | Aparece tras la primera respuesta (planes Pro/Max) |
 | archivos del kit | Todos los del manifiesto | `orq init` |
@@ -177,10 +179,10 @@ sandbox efectivo de sólo lectura. Para `reviewer`, `security-reviewer` y
 
 **Linux/macOS.** La lógica es la misma, pero todavía no hay una corrida real
 end-to-end fuera de Windows (ROADMAP). Reportá lo que encuentres con `orq doctor --json`.
-El launcher sin consola (D-034) es Windows-only y no toca el comando de hooks/
+Los launchers sin consola (D-034/D-035) son Windows-only y no tocan el comando de hooks/
 statusline en POSIX: nada nuevo que verificar ahí.
 
-**`orq init` dice que falta `dist/native/orq-hidden.exe`.** Corré `npm run
+**`orq init` dice que faltan launchers bajo `dist/native/`.** Corré `npm run
 build` en Windows con `csc.exe` disponible (viene con .NET Framework 4.x,
 casi siempre presente; si falta, activar ".NET Framework 3.5" en "Activar o
 desactivar características de Windows").

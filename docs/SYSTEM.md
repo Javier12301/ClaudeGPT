@@ -506,7 +506,8 @@ Claude Code pasa a `statusLine.command` un JSON con `rate_limits.five_hour` y
 `seven_day` (`used_percentage`, `resets_at`), `context_window`, `cost` y
 `session_id`. `orq statusline` persiste `rate_limits` (solo si vienen) y dibuja
 modelo, directorio y branch (de `.git/HEAD`, sin lanzar git), contexto, cuota de
-Claude, cuota de Codex (cache, refresco desacoplado cada 60 s) y `CX> <rol>
+Claude libre 5h/7d, cuota de Codex libre 5h/7d (cache, refresco desacoplado cada
+60 s al siguiente evento) y `CX> <rol>
 <tiempo> <evento>` mientras Codex corre.
 
 ### MCPs
@@ -515,7 +516,7 @@ Claude, cuota de Codex (cache, refresco desacoplado cada 60 s) y `CX> <rol>
 lo que falte: `context7` (HTTP) y `codegraph`. Chrome DevTools MCP no se instala
 por defecto.
 
-### Windows — hooks y statusLine sin consola (D-034)
+### Windows — hooks y statusLine sin consola (D-034/D-035)
 
 Claude Code/Codex spawnean el comando de `settings.json`/`hooks.json` ellos
 mismos, fuera de este repo. En Windows, `orqCmd` (`src/install/merge.ts`) lo
@@ -533,6 +534,14 @@ en Windows; en POSIX es un no-op. **En Linux/macOS/WSL `orqCmd` no cambia**:
 sigue siendo `node "<runtime>/dist/cli.js" <sub>` como siempre, sin ningún
 launcher de por medio (esa mitad no tiene el bug: `node.exe` en Windows es
 subsistema consola, el binario `node` de POSIX no tiene ese concepto).
+
+Claude Code antepone Git Bash a todo comando de statusline/hook. Por eso
+`orq init` configura además `CLAUDE_CODE_GIT_BASH_PATH` hacia
+`<runtime>/dist/native/bash.exe`, otra copia del mismo PE GUI. En ese modo el
+launcher lee `<runtime>/bash-target.txt` y crea el Bash real con
+`CREATE_NO_WINDOW`; así se oculta el shell primario, incluidos los hooks de
+plugins. El manifiesto conserva el valor anterior y `uninstall` lo restaura si
+el usuario no lo cambió luego.
 
 ---
 

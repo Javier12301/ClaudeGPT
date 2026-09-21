@@ -11,8 +11,8 @@ No maximiza agentes activos. Maximiza calidad, throughput útil y ahorro del
 output del modelo caro.
 
 - Windows, Linux, macOS y WSL con la misma lógica (Node ≥ 22.16).
-- Windows: hooks y statusline corren sin mostrar una consola (launcher nativo
-  sin consola, [`docs/DECISIONS.md` D-034](docs/DECISIONS.md)). En
+- Windows: hooks y statusline corren sin mostrar una consola (proxy nativo del
+  Git Bash primario, [`docs/DECISIONS.md` D-035](docs/DECISIONS.md)). En
   Linux/macOS/WSL no cambia nada: siempre corrieron sin ese problema.
 - Cero dependencias de runtime.
 - Instalación, diagnóstico, actualización y desinstalación deterministas.
@@ -27,6 +27,31 @@ orq init --dry-run            # qué va a tocar
 orq init                      # instala (idempotente: correrlo de nuevo no cambia nada)
 orq doctor                    # diagnóstico
 ```
+
+En Windows, `npm run build` genera tanto el launcher de hooks/statusline como
+el proxy oculto `bash.exe`; `orq init` los copia al runtime, registra el Git Bash
+real y configura `CLAUDE_CODE_GIT_BASH_PATH`. No alcanza con clonar o actualizar
+el repositorio. Después de la primera instalación, cerrá por completo Claude
+Code y VS Code y volvé a abrirlos para que carguen la variable nueva.
+
+## Actualización
+
+```bash
+cd ClaudeGPT
+git pull
+npm install
+npm run build
+npm link
+orq init --dry-run
+orq init
+orq doctor
+```
+
+`git pull` solo actualiza las fuentes. `npm run build` regenera los ejecutables
+nativos y `orq init` despliega la nueva versión de forma idempotente. Si la
+actualización cambia el runtime o la configuración de Claude en Windows, cerrá
+por completo Claude Code y VS Code y volvé a abrirlos; abrir únicamente otra
+conversación no recarga el entorno del proceso.
 
 ¿Venís del kit PowerShell (V1)? `orq migrate` — respalda y reemplaza.
 Detalle, upgrade, uninstall y troubleshooting: [`INSTALL.md`](INSTALL.md).
@@ -56,7 +81,9 @@ Si un paso falla, pará y mostrame el error textual; no pruebes alternativas.
    `orq migrate`. Si no, corré `orq init`.
 6. Corré `orq doctor` y mostrame completas las líneas [warn] y [fail].
    Si alguna dice `codex login`, decime que lo corra yo (es interactivo).
-7. Terminá diciéndome que abra una sesión nueva de Claude Code para cargar los hooks.
+7. Terminá diciéndome que cierre por completo Claude Code y VS Code y vuelva a
+   abrirlos. Una conversación nueva no basta para recargar
+   `CLAUDE_CODE_GIT_BASH_PATH`.
 ```
 
 ### Instalación guiada desde Codex, sin Claude Code
@@ -149,7 +176,7 @@ el log no registró la sesión, lo dice en vez de reportar ceros.
 ## Documentación
 
 - [`docs/SYSTEM.md`](docs/SYSTEM.md) — cómo funciona hoy: reglas, arquitectura, flujos, datos, seguridad.
-- [`docs/DECISIONS.md`](docs/DECISIONS.md) — por qué (V2: D-020 a D-033).
+- [`docs/DECISIONS.md`](docs/DECISIONS.md) — por qué y trade-offs de V2.
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — qué falta.
 - [`INSTALL.md`](INSTALL.md) — instalación, upgrade, uninstall, doctor, troubleshooting.
 - [`CHANGELOG.md`](CHANGELOG.md).

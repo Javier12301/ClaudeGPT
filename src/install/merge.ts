@@ -14,6 +14,39 @@ export const LEGACY_MARK = /(?:^|[\\/])\.claude[\\/](?:hooks[\\/](?:git-guard|or
 type Json = Record<string, any>
 const clone = <T>(x: T): T => JSON.parse(JSON.stringify(x ?? {}))
 
+export interface WindowsShellProxyOwnership {
+  installedPath: string
+  previousPath: string | null
+}
+
+// Claude Code ejecuta statusLine/hooks a traves de Git Bash en Windows. El
+// proxy GUI se configura como ese shell primario; orq-hidden por si solo llega
+// demasiado tarde porque es hijo de bash.exe.
+export function mergeWindowsShellProxy(
+  doc: Json,
+  installedPath: string,
+  previous?: WindowsShellProxyOwnership | null,
+): { doc: Json; ownership: WindowsShellProxyOwnership } {
+  const out = clone(doc)
+  const current = typeof out.env?.CLAUDE_CODE_GIT_BASH_PATH === 'string'
+    ? out.env.CLAUDE_CODE_GIT_BASH_PATH as string
+    : null
+  const previousPath = previous && current === previous.installedPath
+    ? previous.previousPath
+    : current
+  out.env = { ...(out.env ?? {}), CLAUDE_CODE_GIT_BASH_PATH: installedPath }
+  return { doc: out, ownership: { installedPath, previousPath } }
+}
+
+export function unmergeWindowsShellProxy(doc: Json, ownership?: WindowsShellProxyOwnership | null): Json {
+  const out = clone(doc)
+  if (!ownership || out.env?.CLAUDE_CODE_GIT_BASH_PATH !== ownership.installedPath) return out
+  if (ownership.previousPath == null) delete out.env.CLAUDE_CODE_GIT_BASH_PATH
+  else out.env.CLAUDE_CODE_GIT_BASH_PATH = ownership.previousPath
+  if (out.env && !Object.keys(out.env).length) delete out.env
+  return out
+}
+
 export interface Ctx {
   runtimeCli: string // ruta absoluta a dist/cli.js del runtime, con '/'
   // Windows: ruta absoluta a orq-hidden.exe y al node.exe en uso, o

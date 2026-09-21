@@ -12,7 +12,6 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { persistUsage, type StatuslineInput } from '../providers/claude.ts'
 import { activeRuns, codexUsageFile, readCodexUsageCache } from '../providers/codex.ts'
-import { freePercent } from '../core/quota.ts'
 
 const CODEX_CACHE_TTL_MS = 60_000
 const HEARTBEAT_FRESH_MS = 90_000 // corrida matada sin cleanup: no dejar el segmento pegado
@@ -29,6 +28,8 @@ function color(pct: number, used: boolean): string {
 function ageMs(file: string): number {
   try { return Date.now() - statSync(file).mtimeMs } catch { return Infinity }
 }
+
+const free = (used: number): number => Math.max(0, Math.min(100, 100 - Number(used)))
 
 // La rama sale de .git/HEAD: leer un archivo, no lanzar git en cada render.
 function gitBranch(dir: string): string | null {
@@ -61,12 +62,16 @@ export function renderStatusline(input: StatuslineInput): string {
   if (ctx != null) parts.push(`ctx ${color(ctx, true)}`)
   const rl = input.rate_limits
   const q: string[] = []
-  if (rl?.five_hour?.used_percentage != null) q.push(`5h ${color(rl.five_hour.used_percentage, true)}`)
-  if (rl?.seven_day?.used_percentage != null) q.push(`7d ${color(rl.seven_day.used_percentage, true)}`)
-  if (q.length) parts.push(q.join(' '))
+  if (rl?.five_hour?.used_percentage != null) q.push(`5h ${color(free(rl.five_hour.used_percentage), false)}`)
+  if (rl?.seven_day?.used_percentage != null) q.push(`7d ${color(free(rl.seven_day.used_percentage), false)}`)
+  if (q.length) parts.push(`CL libre ${q.join(' ')}`)
   const cx = readCodexUsageCache()
-  const cxFree = freePercent(cx?.res)
-  if (cxFree != null) parts.push(`${dim('CX')} ${color(cxFree, false)}`)
+  const cq: string[] = []
+  const primary = cx?.res?.rateLimits?.primary?.usedPercent
+  const secondary = cx?.res?.rateLimits?.secondary?.usedPercent
+  if (primary != null) cq.push(`5h ${color(free(primary), false)}`)
+  if (secondary != null) cq.push(`7d ${color(free(secondary), false)}`)
+  if (cq.length) parts.push(`${dim('CX')} libre ${cq.join(' ')}`)
   // Senal de vida: un archivo por corrida de Codex, solo mientras corre.
   const runs = activeRuns(HEARTBEAT_FRESH_MS)
   if (runs.length) {

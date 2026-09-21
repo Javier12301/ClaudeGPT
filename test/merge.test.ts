@@ -3,7 +3,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   mergeClaudeSettings, unmergeClaudeSettings, mergeCodexHooks, unmergeCodexHooks,
-  mergeAgentsBlock, unmergeAgentsBlock, orqCmd, DENY,
+  mergeAgentsBlock, unmergeAgentsBlock, mergeWindowsShellProxy, unmergeWindowsShellProxy,
+  orqCmd, DENY,
 } from '../src/install/merge.ts'
 
 const ctx = { runtimeCli: 'C:/Users/u/.orquestador/runtime/dist/cli.js' }
@@ -196,4 +197,28 @@ test('orqCmd con launcherExe: sigue conteniendo el marcador de runtime (isOurs l
   assert.deepEqual(twice, doc)
   const { report } = mergeClaudeSettings({}, winCtx)
   assert.deepEqual(unmergeClaudeSettings(doc, report.seeded, report.addedPerms).hooks, undefined)
+})
+
+test('proxy Git Bash: instala, es idempotente y uninstall restaura un valor previo', () => {
+  const proxy = 'C:/Users/u/.orquestador/runtime/dist/native/bash.exe'
+  const user = { env: { CLAUDE_CODE_GIT_BASH_PATH: 'D:/Git/bin/bash.exe', MIA: '1' } }
+  const first = mergeWindowsShellProxy(user, proxy)
+  assert.equal(first.doc.env.CLAUDE_CODE_GIT_BASH_PATH, proxy)
+  assert.deepEqual(first.ownership, {
+    installedPath: proxy,
+    previousPath: 'D:/Git/bin/bash.exe',
+  })
+  const second = mergeWindowsShellProxy(first.doc, proxy, first.ownership)
+  assert.deepEqual(second, first)
+  assert.deepEqual(unmergeWindowsShellProxy(first.doc, first.ownership), user)
+})
+
+test('proxy Git Bash: uninstall no pisa un cambio posterior del usuario', () => {
+  const proxy = 'C:/Users/u/.orquestador/runtime/dist/native/bash.exe'
+  const first = mergeWindowsShellProxy({}, proxy)
+  first.doc.env.CLAUDE_CODE_GIT_BASH_PATH = 'E:/PortableGit/bin/bash.exe'
+  assert.equal(
+    unmergeWindowsShellProxy(first.doc, first.ownership).env.CLAUDE_CODE_GIT_BASH_PATH,
+    'E:/PortableGit/bin/bash.exe',
+  )
 })

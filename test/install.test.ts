@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { spawnSync } from 'node:child_process'
 import { sandbox, orq, type Sandbox } from './helpers.ts'
 import { keyFor, listFiles } from '../src/install/files.ts'
 
@@ -56,6 +57,33 @@ test('init instala runtime, skills, agents, hooks y el kit Codex (sesion ChatGPT
   assert.match(codexHooks, /hook git-guard/)
   assert.equal(codexHooks.split('hook metrics').length - 1, 3, 'Codex registra request/start/stop de subagentes nativos')
   assert.equal(s.permissions.defaultMode, undefined, 'no siembra bypassPermissions')
+  if (process.platform === 'win32') {
+    assert.match(s.env.CLAUDE_CODE_GIT_BASH_PATH, /\.orquestador\/runtime\/dist\/native\/bash\.exe$/)
+    assert.ok(existsSync(path.join(sb.home, '.orquestador', 'runtime', 'bash-target.txt')))
+    const manifest = JSON.parse(readFileSync(path.join(sb.home, '.orquestador', 'manifest.json'), 'utf8'))
+    assert.equal(manifest.windowsShellProxy.installedPath, s.env.CLAUDE_CODE_GIT_BASH_PATH)
+    assert.match(manifest.windowsShellProxy.targetPath, /[\\/]Git[\\/]bin[\\/]bash\.exe$/i)
+  }
+})
+
+test('Windows: uninstall restaura CLAUDE_CODE_GIT_BASH_PATH y preserva cambios posteriores', { skip: process.platform !== 'win32' }, () => {
+  const sb = sandbox()
+  const gitExe = spawnSync('where.exe', ['git'], { encoding: 'utf8' }).stdout.trim().split(/\r?\n/)[0]
+  const previous = path.join(path.dirname(path.dirname(gitExe)), 'bin', 'bash.exe').replaceAll('\\', '/')
+  mkdirSync(path.join(sb.home, '.claude'), { recursive: true })
+  writeFileSync(path.join(sb.home, '.claude', 'settings.json'), JSON.stringify({ env: { CLAUDE_CODE_GIT_BASH_PATH: previous, MIA: '1' } }))
+  assert.equal(orq(sb, ['init', '--offline']).code, 0)
+  assert.notEqual(settings(sb).env.CLAUDE_CODE_GIT_BASH_PATH, previous)
+  assert.equal(orq(sb, ['uninstall', '--offline']).code, 0)
+  assert.deepEqual(settings(sb).env, { CLAUDE_CODE_GIT_BASH_PATH: previous, MIA: '1' })
+
+  const changed = sandbox()
+  assert.equal(orq(changed, ['init', '--offline']).code, 0)
+  const doc = settings(changed)
+  doc.env.CLAUDE_CODE_GIT_BASH_PATH = 'E:/PortableGit/bin/bash.exe'
+  writeFileSync(path.join(changed.home, '.claude', 'settings.json'), JSON.stringify(doc))
+  assert.equal(orq(changed, ['uninstall', '--offline']).code, 0)
+  assert.equal(settings(changed).env.CLAUDE_CODE_GIT_BASH_PATH, 'E:/PortableGit/bin/bash.exe')
 })
 
 test('sin Codex: init instala solo el lado Claude y lo dice', () => {

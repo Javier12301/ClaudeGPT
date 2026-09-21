@@ -10,6 +10,7 @@ process.stdin.on('end', () => {
     for (let i = 0; i < 2000; i++) process.stdout.write(`line ${i}\n`)
   }
   if (mode === 'exit3') process.exit(3)
-  if (mode === 'stderr') { process.stderr.write(`err:${input}`); process.exit(7) }
-  process.stdout.write(JSON.stringify({ args: process.argv.slice(2), len: input.length, input }) + '\n')
+  const output = JSON.stringify({ args: process.argv.slice(2), len: input.length, input, cwd: process.cwd() }) + '\n'
+  if (mode === 'stderr') { process.stdout.write(output); process.stderr.write(`err:${input}`); process.exit(7) }
+  process.stdout.write(output)
 })

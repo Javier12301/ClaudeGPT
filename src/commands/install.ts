@@ -14,7 +14,8 @@ import { claudeInfo, usageFile } from '../providers/claude.ts'
 import { Tx, listFiles, pruneBackups } from '../install/files.ts'
 import {
   mergeClaudeSettings, unmergeClaudeSettings, mergeCodexHooks, unmergeCodexHooks,
-  mergeAgentsBlock, unmergeAgentsBlock, RUNTIME_MARK, LEGACY_MARK,
+  mergeAgentsBlock, unmergeAgentsBlock, mergeWindowsShellProxy, unmergeWindowsShellProxy,
+  type WindowsShellProxyOwnership, RUNTIME_MARK, LEGACY_MARK,
 } from '../install/merge.ts'
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -30,6 +31,9 @@ export const runtimeCli = () => path.join(runtimeDir(), 'dist', 'cli.js').replac
 // de mas abajo ya lo instala solo, sin un paso especial.
 export const launcherExe = () => path.join(runtimeDir(), 'dist', 'native', 'orq-hidden.exe').replaceAll('\\', '/')
 const launcherSrc = () => path.join(PKG_ROOT, 'dist', 'native', 'orq-hidden.exe')
+export const bashProxyExe = () => path.join(runtimeDir(), 'dist', 'native', 'bash.exe').replaceAll('\\', '/')
+const bashProxySrc = () => path.join(PKG_ROOT, 'dist', 'native', 'bash.exe')
+export const bashTargetFile = () => path.join(runtimeDir(), 'bash-target.txt')
 export const manifestFile = () => path.join(orqHome(), 'manifest.json')
 const toolsDir = () => path.join(orqHome(), 'tools')
 export const codegraphCli = () => path.join(toolsDir(), 'node_modules', '@lzehrung', 'codegraph', 'dist', 'bin', 'cli.js')
@@ -45,6 +49,7 @@ export interface Manifest {
   mcp: { claude: string[]; codex: string[] }
   codeIntel: 'codegraph' | 'none'
   codex: boolean
+  windowsShellProxy: (WindowsShellProxyOwnership & { targetPath: string }) | null
 }
 
 function normalizeManifest(raw: Partial<Manifest> | null): Manifest | null {
@@ -55,6 +60,7 @@ function normalizeManifest(raw: Partial<Manifest> | null): Manifest | null {
     addedPerms: raw.addedPerms ?? [], replaced: raw.replaced ?? {},
     mcp: { claude: raw.mcp?.claude ?? [], codex: raw.mcp?.codex ?? [] },
     codeIntel: raw.codeIntel ?? 'none', codex: raw.codex ?? false,
+    windowsShellProxy: raw.windowsShellProxy ?? null,
   }
 }
 
@@ -66,6 +72,36 @@ function readJsonStrict(file: string): { ok: true; doc: any } | { ok: false; err
   if (!existsSync(file)) return { ok: true, doc: {} }
   try { return { ok: true, doc: JSON.parse(readFileSync(file, 'utf8').replace(/^\uFEFF/, '') || '{}') } }
   catch (e: any) { return { ok: false, error: `${file} no es JSON valido: ${e.message}` } }
+}
+
+const samePath = (a: string, b: string) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase()
+
+// Claude acepta como shell solo bash.exe/sh.exe. Se prioriza el target ya
+// administrado, luego una eleccion previa del usuario y por ultimo el Git del
+// PATH. Nunca devolver el proxy mismo: eso recursaria sin limite.
+export function resolveRealGitBash(settings: any, previous?: Manifest['windowsShellProxy']): string | null {
+  const configured = typeof settings?.env?.CLAUDE_CODE_GIT_BASH_PATH === 'string'
+    ? settings.env.CLAUDE_CODE_GIT_BASH_PATH
+    : null
+  const candidates: string[] = []
+  if (configured) candidates.push(configured)
+  if (previous?.targetPath) candidates.push(previous.targetPath)
+  const git = resolveCommand('git')?.file
+  if (git) {
+    const gitDir = path.dirname(git)
+    const root = path.dirname(gitDir)
+    candidates.push(path.join(root, 'bin', 'bash.exe'), path.join(root, 'usr', 'bin', 'bash.exe'))
+  }
+  if (process.env.LOCALAPPDATA) candidates.push(path.join(process.env.LOCALAPPDATA, 'Programs', 'Git', 'bin', 'bash.exe'))
+  if (process.env.ProgramFiles) candidates.push(path.join(process.env.ProgramFiles, 'Git', 'bin', 'bash.exe'))
+  if (process.env['ProgramFiles(x86)']) candidates.push(path.join(process.env['ProgramFiles(x86)']!, 'Git', 'bin', 'bash.exe'))
+  for (const candidate of candidates) {
+    const name = path.basename(candidate).toLowerCase()
+    if (!['bash.exe', 'sh.exe', 'bash', 'sh'].includes(name)) continue
+    if (samePath(candidate, bashProxyExe()) || !existsSync(candidate)) continue
+    return path.resolve(candidate)
+  }
+  return null
 }
 
 // Lo que el V1 (PowerShell) dejaba instalado y el V2 reemplaza.
@@ -95,12 +131,19 @@ export function preflight(): string | null {
   if (!nodeOk()) return `Node ${process.versions.node}: se requiere >= ${MIN_NODE.join('.')}.`
   if (!which('git')) return 'Falta git en el PATH.'
   if (!existsSync(path.join(PKG_ROOT, 'dist', 'cli.js'))) return 'Falta dist/: corre `npm run build` antes de `orq init`.'
-  if (process.platform === 'win32' && !existsSync(launcherSrc())) {
-    return 'Falta dist/native/orq-hidden.exe: corre `npm run build` (necesita csc.exe / .NET Framework 4.x, incluido de fabrica en casi todo Windows) antes de `orq init`. Sin el, los hooks en Windows mostrarian consola.'
-  }
   for (const file of [path.join(claudeHome(), 'settings.json'), path.join(codexHome(), 'hooks.json')]) {
     const r = readJsonStrict(file)
     if (!r.ok) return `${r.error}\nCorregilo a mano (o restaura un backup) y volve a correr.`
+  }
+  if (process.platform === 'win32') {
+    if (!existsSync(launcherSrc()) || !existsSync(bashProxySrc())) {
+      return 'Faltan dist/native/orq-hidden.exe o dist/native/bash.exe: corre `npm run build` (necesita csc.exe / .NET Framework 4.x) antes de `orq init`. Sin el proxy, Claude Code muestra una consola por cada hook/statusline.'
+    }
+    const settings = readJsonStrict(path.join(claudeHome(), 'settings.json')) as { ok: true; doc: any }
+    const prev = normalizeManifest(readJson<Partial<Manifest>>(manifestFile()))
+    if (!resolveRealGitBash(settings.doc, prev?.windowsShellProxy)) {
+      return 'No se encontro el Git Bash real para el proxy sin consola. Instala Git for Windows o configura CLAUDE_CODE_GIT_BASH_PATH con su bash.exe y volve a correr.'
+    }
   }
   return null
 }
@@ -131,7 +174,8 @@ async function install(o: InitOptions, partial: { m: Manifest | null }): Promise
   const prev = normalizeManifest(readJson<Partial<Manifest>>(manifestFile()))
   const m: Manifest = { version: pkgVersion(), installedAt: prev?.installedAt || new Date().toISOString(), files: [], seeded: prev?.seeded ?? [], created: prev?.created ?? [],
     addedPerms: prev?.addedPerms ?? [], replaced: prev?.replaced ?? {},
-    mcp: { claude: prev?.mcp.claude ?? [], codex: prev?.mcp.codex ?? [] }, codeIntel: prev?.codeIntel ?? 'none', codex: false }
+    mcp: { claude: prev?.mcp.claude ?? [], codex: prev?.mcp.codex ?? [] }, codeIntel: prev?.codeIntel ?? 'none', codex: false,
+    windowsShellProxy: null }
   partial.m = m
   const isWin = process.platform === 'win32'
   const ctx = { runtimeCli: runtimeCli(), launcherExe: isWin ? launcherExe() : null, nodeExe: isWin ? process.execPath.replaceAll('\\', '/') : null }
@@ -151,12 +195,23 @@ async function install(o: InitOptions, partial: { m: Manifest | null }): Promise
   tx.write(pkgTarget, readFileSync(path.join(PKG_ROOT, 'package.json'), 'utf8')); m.files.push(pkgTarget)
   m.files.push(...tx.copyTree(path.join(PKG_ROOT, 'dist'), path.join(runtimeDir(), 'dist'), true))
   m.files.push(...tx.copyTree(KIT, path.join(runtimeDir(), 'kit'), true))
+  if (isWin) {
+    const target = resolveRealGitBash(settings.doc, prev?.windowsShellProxy)
+    if (!target) throw new Error('Git Bash real desaparecio despues del preflight.')
+    tx.write(bashTargetFile(), target + '\n'); m.files.push(bashTargetFile())
+    m.windowsShellProxy = { installedPath: bashProxyExe(), targetPath: target, previousPath: null }
+  }
 
   // 2. Claude: skills, agents, settings.
   const claude = await claudeInfo()
   ownTree(path.join(KIT, 'claude', 'skills'), path.join(claudeHome(), 'skills'))
   ownTree(path.join(KIT, 'claude', 'agents'), path.join(claudeHome(), 'agents'))
   const merged = mergeClaudeSettings(settings.doc, ctx)
+  if (m.windowsShellProxy) {
+    const shell = mergeWindowsShellProxy(merged.doc, m.windowsShellProxy.installedPath, prev?.windowsShellProxy)
+    merged.doc = shell.doc
+    m.windowsShellProxy = { ...m.windowsShellProxy, ...shell.ownership }
+  }
   if (!existsSync(settingsFile)) m.created.push(settingsFile)
   tx.write(settingsFile, json(merged.doc))
   m.seeded = [...new Set([...m.seeded, ...merged.report.seeded])]
@@ -235,6 +290,9 @@ async function install(o: InitOptions, partial: { m: Manifest | null }): Promise
   log(o.dryRun ? '== orq init --dry-run (no se escribio nada) ==' : '== orq init ==')
   log(tx.changes.length ? tx.changes.map(c => `  ${c}`).join('\n') : '  sin cambios: la instalacion ya estaba al dia')
   if (!o.dryRun && tx.changes.length) log(`Respaldos: ${tx.backupRoot}`)
+  if (!o.dryRun && isWin && tx.changes.some(c => c.includes(settingsFile) || c.includes(bashProxyExe()))) {
+    log('Reinicia las sesiones de Claude Code y VS Code para cargar el shell oculto.')
+  }
   if (!external) log('Modo --offline: sin registro de MCPs ni descarga de codegraph (code intel cae a git ls-files + grep).')
   if (!claude.installed) log('AVISO: `claude` no esta en el PATH; el kit se instalo igual.')
   if (merged.report.statusLine === 'foreign') log('AVISO: tenes otra statusLine configurada; no se piso. El gate no va a ver la cuota de Claude (degrada a BALANCED).')
@@ -285,6 +343,13 @@ export async function doctorCommand(o: { json: boolean }): Promise<number> {
     const sl = String(s.doc.statusLine?.command ?? '')
     add('statusline', sl.includes(RUNTIME_MARK) ? 'ok' : 'warn', sl || 'ninguna',
       sl.includes(RUNTIME_MARK) ? undefined : 'sin la statusline de orq el gate no ve la cuota de Claude')
+    if (process.platform === 'win32') {
+      const configured = String(s.doc.env?.CLAUDE_CODE_GIT_BASH_PATH ?? '')
+      let target = ''
+      try { target = readFileSync(bashTargetFile(), 'utf8').trim() } catch { /* falta */ }
+      const ok = configured === bashProxyExe() && existsSync(bashProxyExe()) && !!target && existsSync(target) && !samePath(target, bashProxyExe())
+      add('shell Claude oculto', ok ? 'ok' : 'fail', ok ? `${configured} -> ${target}` : configured || 'sin proxy', 'orq init')
+    }
     if (s.doc.permissions?.defaultMode === 'bypassPermissions') add('permisos', 'warn', 'defaultMode = bypassPermissions (lo sembraba el V1)', 'evaluar volver a un modo con prompts; orq no lo necesita')
   }
   const usage = readJson<{ ts: string }>(usageFile())
@@ -333,7 +398,10 @@ export async function uninstallCommand(o: { dryRun: boolean; external?: boolean 
   const sf = path.join(claudeHome(), 'settings.json')
   const s = readJsonStrict(sf)
   if (s.ok && existsSync(sf)) {
-    const clean = unmergeClaudeSettings(s.doc, m.seeded, m.addedPerms)
+    const clean = unmergeWindowsShellProxy(
+      unmergeClaudeSettings(s.doc, m.seeded, m.addedPerms),
+      m.windowsShellProxy,
+    )
     if (m.created.includes(sf) && emptyConfig(clean)) tx.remove(sf); else tx.write(sf, json(clean))
   }
   if (m.codex) {

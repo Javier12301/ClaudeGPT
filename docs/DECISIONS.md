@@ -1175,7 +1175,7 @@ pertenezcan.
 
 ## D-034 — Launcher nativo Win32 para que los hooks no muestren consola en Windows
 
-Estado: Aceptada
+Estado: Superada por D-035
 Fecha: 2026-09-12
 
 ### Contexto
@@ -1227,8 +1227,7 @@ mismo PE corre vía JIT tanto en Windows x64 como ARM64 sin builds separados.
 
 ### Consecuencias
 
-+ Windows no vuelve a mostrar consola en hooks/statusline, sin degradar
-  ninguno (`git-guard`, `session-start`, `metrics` siguen intactos).
++ Oculta `node.exe` cuando el host ejecuta el comando directamente.
 + Sin dependencia nueva de build ni de runtime: `csc.exe` ya viene con
   Windows; el usuario final no necesita compilar nada.
 + Contrato de pipes robusto por diseño: al no relayar bytes, no hay superficie
@@ -1237,7 +1236,40 @@ mismo PE corre vía JIT tanto en Windows x64 como ARM64 sin builds separados.
   que correr en una máquina/CI Windows (o cross-compilar con el SDK de
   `dotnet`) antes de `npm publish`, para que el `.exe` viaje ya compilado
   dentro de `dist/`. No resuelto en este trabajo, solo anotado.
-- Sigue existiendo una dependencia externa no verificable: si Claude Code
-  spawnea el string de `settings.json` a través de un shell (`cmd.exe /c`)
-  en vez de exec directo del primer token, ningún contenido del string lo
-  arregla — sería un bug del lado del host, fuera de este repo.
+- Claude Code sí ejecuta los comandos mediante Git Bash. Ese `bash.exe` nace
+  antes que `orq-hidden.exe`, por lo que D-034 no elimina el parpadeo por sí
+  sola. D-035 mueve la supresión a la capa correcta.
+
+## D-035 — Proxy GUI para el Git Bash primario de Claude Code en Windows
+
+Estado: Aceptada
+Fecha: 2026-09-21
+
+### Contexto
+
+La verificación posterior a D-034 mostró la cadena real de ejecución:
+`claude.exe -> bash.exe -> orq-hidden.exe -> node.exe`. Claude Code usa Git
+Bash como shell de `statusLine.command` y hooks de tipo `command`, y lo crea
+sin `CREATE_NO_WINDOW`. Ocultar solo el último hijo no puede ocultar la consola
+que ya abrió el shell. Los hooks de plugins multiplican esas invocaciones.
+
+### Decisión
+
+El mismo PE GUI se publica también como `dist/native/bash.exe`. Invocado con
+ese nombre, lee el Git Bash real desde `runtime/bash-target.txt`, conserva
+argumentos, entorno, cwd y handles de stdio, y lo crea con `CREATE_NO_WINDOW`.
+`orq init` apunta `CLAUDE_CODE_GIT_BASH_PATH` a ese proxy, registra target y
+valor previo en el manifiesto, y `uninstall` restaura el valor solo si el
+usuario no lo cambió después.
+
+La statusline queda event-driven y muestra porcentajes libres consistentes:
+Claude 5h/7d y Codex 5h/7d. No se agrega un refresco periódico.
+
+### Consecuencias
+
++ Se oculta el proceso que realmente originaba `conhost.exe`, cubriendo a la
+  vez statusline, hooks propios y hooks de plugins en CLI y VS Code.
++ La instalación y desinstalación siguen siendo idempotentes y reversibles.
++ D-034 permanece como defensa para Node/Codex y comparte el contrato nativo.
+- El fix depende de Git for Windows, requisito que Claude Code ya usa en esta
+  instalación; `preflight` frena con diagnóstico si no encuentra el Bash real.

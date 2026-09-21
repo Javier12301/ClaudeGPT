@@ -251,7 +251,7 @@ Estado: IN_PROGRESS. Ver [D-020](DECISIONS.md) a D-030 y CHANGELOG 2.0.0-rc.1.
 - [ ] **`npm publish`** — solo con la verificación end-to-end completa (INSTALL.md).
       `npm run build` va a tener que correr en una máquina/CI Windows (o
       cross-compilar con el SDK de `dotnet`) para que `dist/native/orq-hidden.exe`
-      viaje ya compilado en el tarball (D-034); hoy se compila local con `csc.exe`.
+      y `bash.exe` viajen ya compilados en el tarball (D-034/D-035); hoy se compilan localmente con `csc.exe`.
 - [x] **Decidir Serena**: retirada, codegraph es el único motor (D-032).
 - [x] **Completar la skill de Codex**: DIRECT por defecto, topologías nativas,
       Codex standalone, aislamiento de contexto y roles estrechos.
@@ -270,13 +270,10 @@ Estado: IN_PROGRESS. Ver [D-020](DECISIONS.md) a D-030 y CHANGELOG 2.0.0-rc.1.
   nunca fallo).
 - El `task` de un subagente se asocia por orden (FIFO por tipo); con spawns
   paralelos del mismo tipo el texto puede cruzarse. La duración no (va por `agent_id`).
-- Launcher sin consola en Windows (D-034): verificado que el `.exe` es
-  subsistema GUI, que el contrato de pipes (stdin/stdout/stderr/exit code/
-  concurrencia) funciona en tests automatizados, y que el comando instalado
-  corre bien manualmente. Falta la confirmación visual en una sesión real de
-  Claude Code disparando un hook. Si el host resultara spawnear el string de
-  `settings.json` a través de `cmd.exe /c` en vez de exec directo, ningún
-  contenido del comando lo arregla (bug del host, no de este repo).
+- Launchers sin consola en Windows (D-034/D-035): verificados subsistema GUI,
+  contrato de pipes, argumentos, cwd, exit code, concurrencia y ownership
+  reversible. Falta la confirmación visual final en CLI y VS Code con una
+  sesión nueva; el proxy ahora cubre el Git Bash primario confirmado.
 - codegraph tiene bus factor 1; está pinneado y detrás de `CodeIntelProvider`.
 - Un workflow nativo de Claude Code (dynamic workflows) no pasa por el gate de cuota.
 - El hook `SessionStart` agrega dos líneas de contexto también en repos donde no

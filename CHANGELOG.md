@@ -20,6 +20,10 @@ correspondiente de [`docs/SYSTEM.md`](docs/SYSTEM.md) en el mismo diff.
 
 ### Fixed
 
+- Windows: Claude Code usa un proxy GUI `bash.exe` para su Git Bash primario,
+  configurado por `CLAUDE_CODE_GIT_BASH_PATH`. Esto evita la consola fugaz en
+  ejecuciones frecuentes fuera de hooks/statusline; instalación y actualización
+  requieren `npm run build`, `orq init` y reiniciar Claude Code/VS Code (D-035).
 - Windows: los hooks y la statusline ya no muestran una consola al
   ejecutarse. `orq init` los rutea a través de `orq-hidden.exe` (launcher
   nativo Win32, subsistema GUI, `CreateProcessW` + `CREATE_NO_WINDOW`,
