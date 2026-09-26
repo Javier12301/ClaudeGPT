@@ -13,6 +13,14 @@
       "version": "2.0.0",
       "category": "productivity",
       "homepage": "https://github.com/Javier12301/Claudio-y-Gepeto"
+    },
+    {
+      "name": "claudegpt-notify",
+      "source": "./plugins/claudegpt-notify",
+      "description": "Opcional: notificación de escritorio en Stop y Notification (Windows y Linux).",
+      "version": "2.0.0",
+      "category": "productivity",
+      "homepage": "https://github.com/Javier12301/Claudio-y-Gepeto"
     }
   ]
 }

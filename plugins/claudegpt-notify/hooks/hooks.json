@@ -1,0 +1,27 @@
+{
+  "description": "Notificación de escritorio opcional en Stop y Notification (Windows: toast oculto; Linux: notify-send).",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/notify.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/notify.mjs\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

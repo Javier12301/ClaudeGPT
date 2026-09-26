@@ -1,0 +1,12 @@
+{
+  "name": "claudegpt-notify",
+  "version": "2.0.0",
+  "description": "Opcional: notificación de escritorio al terminar o cuando Claude pide atención. Windows y Linux. El orquestador no depende de este plugin.",
+  "author": {
+    "name": "Javier Ramírez"
+  },
+  "homepage": "https://github.com/Javier12301/Claudio-y-Gepeto",
+  "repository": "https://github.com/Javier12301/Claudio-y-Gepeto",
+  "license": "MIT",
+  "keywords": ["notifications", "hooks"]
+}
