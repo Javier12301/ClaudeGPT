@@ -1,4 +1,0 @@
-interface:
-  display_name: "Revisor completo"
-  short_description: "Revisión distribuida de código y seguridad"
-  default_prompt: "Usá $revisor-completo para revisar completamente este proyecto y priorizar findings accionables."
