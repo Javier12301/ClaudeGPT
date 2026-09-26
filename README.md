@@ -17,7 +17,7 @@ Plataformas: **Windows y Linux**.
 Requisitos: Claude Code, Git, Node 18+ y una cuenta de ChatGPT para Codex.
 
 1. Cloná el repo:
-   `git clone https://github.com/Javier12301/Claudio-y-Gepeto.git ClaudeGPT && cd ClaudeGPT`
+   `git clone https://github.com/Javier12301/ClaudeGPT.git && cd ClaudeGPT`
 2. Corré el instalador. Verifica Node, instala Codex CLI y copia
    `setup/codex-config.toml` a `~/.codex/config.toml` **solo si no existe**:
    - Windows: `powershell -ExecutionPolicy Bypass -File setup\install.ps1`

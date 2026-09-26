@@ -12,7 +12,7 @@
       "description": "Skill /claudegpt:orquestador: Claude como Tech Lead que planifica por fases y rutea a Claude, subagentes Sonnet o Codex.",
       "version": "2.0.0",
       "category": "productivity",
-      "homepage": "https://github.com/Javier12301/Claudio-y-Gepeto"
+      "homepage": "https://github.com/Javier12301/ClaudeGPT"
     },
     {
       "name": "claudegpt-notify",
@@ -20,7 +20,7 @@
       "description": "Opcional: notificación de escritorio en Stop y Notification (Windows y Linux).",
       "version": "2.0.0",
       "category": "productivity",
-      "homepage": "https://github.com/Javier12301/Claudio-y-Gepeto"
+      "homepage": "https://github.com/Javier12301/ClaudeGPT"
     }
   ]
 }
