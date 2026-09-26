@@ -11,7 +11,6 @@ CODEX_VERSION_LINUX="latest"
 
 NODE_MIN_MAJOR=18
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 CODEX_HOME_DIR="${CODEX_HOME:-$HOME/.codex}"
 DRY_RUN=0
 
@@ -70,7 +69,7 @@ cat <<EOF
   2. Dentro de Claude Code:
        /plugin marketplace add openai/codex-plugin-cc
        /plugin install codex@openai-codex
-       /plugin marketplace add $REPO_ROOT
+       /plugin marketplace add Javier12301/ClaudeGPT
        /plugin install claudegpt@claudegpt
        /plugin install claudegpt-notify@claudegpt     (opcional; necesita notify-send)
        /reload-plugins

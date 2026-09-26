@@ -50,3 +50,11 @@ con 0.
 - Windows: la versión estable verificada, en una variable de `install.ps1`.
 - Linux: `latest`.
 - No hay soporte para macOS.
+
+## Sin `version` en los manifests
+
+Los plugins no declaran `version`, ni en `plugin.json` ni en `marketplace.json`, para
+que las instalaciones desde GitHub reciban cada commit con
+`/plugin marketplace update claudegpt`. Con una versión fija, los cambios nuevos no
+llegan hasta que se sube el número. `claude plugin validate` avisa de la falta de
+versión, y ese aviso se acepta.

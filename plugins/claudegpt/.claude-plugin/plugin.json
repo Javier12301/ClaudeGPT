@@ -1,6 +1,5 @@
 {
   "name": "claudegpt",
-  "version": "2.0.0",
   "description": "Orquestación por fases con ruteo Claude/Codex. La skill se invoca solo a mano con /claudegpt:orquestador.",
   "author": {
     "name": "Javier Ramírez"

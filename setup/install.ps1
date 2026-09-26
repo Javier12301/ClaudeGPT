@@ -14,7 +14,6 @@ $ErrorActionPreference = 'Stop'
 $CODEX_VERSION_WINDOWS = '0.157.1'
 
 $NODE_MIN_MAJOR = 18
-$RepoRoot = Split-Path -Parent $PSScriptRoot
 $CodexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }
 
 function Step($msg) { Write-Host "==> $msg" -ForegroundColor Cyan }
@@ -66,7 +65,7 @@ Write-Host @"
   2. Dentro de Claude Code:
        /plugin marketplace add openai/codex-plugin-cc
        /plugin install codex@openai-codex
-       /plugin marketplace add $RepoRoot
+       /plugin marketplace add Javier12301/ClaudeGPT
        /plugin install claudegpt@claudegpt
        /plugin install claudegpt-notify@claudegpt     (opcional)
        /reload-plugins
