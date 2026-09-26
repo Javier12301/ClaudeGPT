@@ -1,0 +1,18 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "claudegpt",
+  "description": "Orquestación por fases sobre Claude Code, con Codex como ejecutor vía el plugin oficial openai/codex-plugin-cc.",
+  "owner": {
+    "name": "Javier Ramírez"
+  },
+  "plugins": [
+    {
+      "name": "claudegpt",
+      "source": "./plugins/claudegpt",
+      "description": "Skill /claudegpt:orquestador: Claude como Tech Lead que planifica por fases y rutea a Claude, subagentes Sonnet o Codex.",
+      "version": "2.0.0",
+      "category": "productivity",
+      "homepage": "https://github.com/Javier12301/Claudio-y-Gepeto"
+    }
+  ]
+}
