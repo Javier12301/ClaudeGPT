@@ -1,0 +1,16 @@
+# Configuración base de Codex para ClaudeGPT.
+# setup/install.* la copia a $CODEX_HOME/config.toml (por defecto ~/.codex) solo si no existe.
+# Sin modelo fijado: Codex usa el default de tu cuenta ChatGPT.
+
+model_reasoning_effort = "medium"
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+network_access = false
+
+[windows]
+sandbox = "elevated"
+
+[mcp_servers.context7]
+url = "https://mcp.context7.com/mcp"
+enabled = true
