@@ -1,185 +1,113 @@
-# Orquestador V2 — Claude Code + Codex
+# ClaudeGPT: orquestador Claude + Codex
 
-Un runtime portable (`orq`) y una política para trabajar con **un solo
-razonador por tarea** sobre dos suscripciones. El razonador — Claude o Codex —
-resuelve directo lo que ya entiende y delega solo cuando la delegación tiene una
-utilidad concreta y nombrable: paralelismo real, aislamiento de contexto,
-independencia de criterio, volumen mecánico, capacidad especializada o
-exploración amplia. Todo lo que vuelve lo arbitra él.
+Marketplace de plugins de Claude Code con una skill de invocación manual,
+**`/claudegpt:orquestador`**. Claude trabaja como Tech Lead: investiga, pregunta,
+planifica por fases y arbitra. Cada fase se ejecuta con Claude directo, con un
+subagente Sonnet o con Codex. Codex se usa a través del plugin oficial
+[`openai/codex-plugin-cc`](https://github.com/openai/codex-plugin-cc); este repo no
+lanza procesos propios.
 
-No maximiza agentes activos. Maximiza calidad, throughput útil y ahorro del
-output del modelo caro.
+Fuera de `/claudegpt:orquestador`, Claude Code trabaja normalmente: no hay fases,
+documentos ni delegación automática.
 
-- Windows, Linux, macOS y WSL con la misma lógica (Node ≥ 22.16).
-- Windows: hooks y statusline corren sin mostrar una consola (proxy nativo del
-  Git Bash primario, [`docs/DECISIONS.md` D-035](docs/DECISIONS.md)). En
-  Linux/macOS/WSL no cambia nada: siempre corrieron sin ese problema.
-- Cero dependencias de runtime.
-- Instalación, diagnóstico, actualización y desinstalación deterministas.
-- Degrada solo: sin Codex, modo Claude-solo; sin codegraph, `git` como code intel.
+Plataformas: **Windows y Linux**.
 
-## Instalación
+## Instalación en una PC nueva
+
+Requisitos: Claude Code, Git, Node 18+ y una cuenta de ChatGPT para Codex.
+
+1. Cloná el repo:
+   `git clone https://github.com/Javier12301/Claudio-y-Gepeto.git ClaudeGPT && cd ClaudeGPT`
+2. Corré el instalador. Verifica Node, instala Codex CLI y copia
+   `setup/codex-config.toml` a `~/.codex/config.toml` **solo si no existe**:
+   - Windows: `powershell -ExecutionPolicy Bypass -File setup\install.ps1`
+   - Linux: `bash setup/install.sh`
+
+   (Con `-DryRun` / `--dry-run` muestra qué haría sin tocar nada.)
+3. Iniciá sesión en Codex: `codex login`
+4. En Claude Code, instalá el plugin de Codex:
+   `/plugin marketplace add openai/codex-plugin-cc` y `/plugin install codex@openai-codex`
+5. Instalá este marketplace y el orquestador:
+   `/plugin marketplace add <ruta del repo clonado>` y `/plugin install claudegpt@claudegpt`
+6. Opcional: `/plugin install claudegpt-notify@claudegpt`, para recibir notificaciones de escritorio.
+7. `/reload-plugins`, y después `/codex:setup` para verificar que Codex está listo.
+8. Probá: `/claudegpt:orquestador <requerimiento y preferencias>`
+
+El instalador imprime estos mismos comandos con la ruta ya resuelta.
+
+> No actives el review gate del plugin de Codex (`/codex:setup --enable-review-gate`):
+> el orquestador decide cuándo conviene un review.
+
+## Uso
+
+```
+/claudegpt:orquestador Implementar X. Tests: Codex. Review: Codex. Implementación: decidí vos.
+/claudegpt:orquestador docs/analisis-x.md
+/claudegpt:orquestador continuar
+```
+
+- Las preferencias que declares (quién testea, quién revisa, quién implementa) mandan
+  sobre las reglas por defecto.
+- Arranca en plan mode: investiga, pregunta hasta cerrar dudas y entrega un informe de
+  viabilidad. Cuando aprobás el plan, lo escribe en `IMPLEMENTATION.md` (plan y
+  estado de la feature en un solo documento).
+- Hace un commit por cada unidad lógica estable. **Nunca hace `git push`.**
+- Cuando el contexto se ensucia, deja todo persistido en `/docs`, `IMPLEMENTATION.md`
+  y `HANDOFF.md`, y te recomienda `/compact`. Para retomar en una sesión nueva:
+  `/claudegpt:orquestador continuar`.
+- La invocación siempre lleva el prefijo del plugin (`/claudegpt:orquestador`). Claude
+  Code no ofrece `/orquestador` a secas para skills de plugin.
+
+## Cómo se ejecutan los reviews de Codex
+
+`/codex:review` y `/codex:adversarial-review` solo se pueden invocar a mano. Para que
+el orquestador pueda lanzarlos solo, `plugins/claudegpt/scripts/codex-review.mjs` ubica
+el `codex-companion.mjs` del plugin de Codex instalado y lo llama con los mismos
+argumentos que esos comandos. Busca primero en `~/.claude/plugins/installed_plugins.json`
+y, si no lo encuentra ahí, en el cache con la versión más alta. Respeta `CLAUDE_CONFIG_DIR`.
+
+**Esto depende de la estructura interna del plugin de Codex.** Si una actualización
+del plugin cambia esa estructura, el wrapper sale con código 3 y el orquestador se
+detiene para pedirte que tipees el comando a mano (por ejemplo `/codex:review --base
+main`). Nunca saltea el review en silencio.
+
+## Versión de Codex
+
+- **Windows:** `$CODEX_VERSION_WINDOWS` en `setup/install.ps1` es la **versión estable
+  verificada**, hoy 0.157.1. Subila solo después de usar una versión nueva en
+  condiciones reales sin que se abran ventanas de consola. Si reaparecen, volvé de
+  inmediato a la última estable y corré de nuevo el instalador.
+- **Linux:** `CODEX_VERSION_LINUX="latest"` en `setup/install.sh`.
+
+## Notificaciones (opcional)
+
+`claudegpt-notify` muestra una notificación cuando Claude termina o pide atención. En
+Windows es un toast y en Linux usa `notify-send`; si no está instalado, no hace nada.
+El orquestador no depende de este plugin: si da problemas,
+`/plugin uninstall claudegpt-notify@claudegpt` y listo.
+
+## Estructura
+
+```
+.claude-plugin/marketplace.json
+plugins/claudegpt/               skill orquestador, plantillas, guía de Codex, codex-review.mjs
+plugins/claudegpt-notify/        hooks Stop/Notification (opcional)
+setup/                           install.ps1, install.sh, codex-config.toml
+docs/decisions.md                decisiones vigentes
+```
+
+## Desarrollo
 
 ```bash
-npx orquestador init          # pendiente de release en npm; mientras tanto:
-git clone https://github.com/Javier12301/ClaudeGPT.git && cd ClaudeGPT && npm install && npm run build && npm link
-orq init --dry-run            # qué va a tocar
-orq init                      # instala (idempotente: correrlo de nuevo no cambia nada)
-orq doctor                    # diagnóstico
+node --test "plugins/*/test/*.test.mjs"
+claude plugin validate . && claude plugin validate ./plugins/claudegpt && claude plugin validate ./plugins/claudegpt-notify
 ```
 
-En Windows, `npm run build` genera tanto el launcher de hooks/statusline como
-el proxy oculto `bash.exe`; `orq init` los copia al runtime, registra el Git Bash
-real y configura `CLAUDE_CODE_GIT_BASH_PATH`. No alcanza con clonar o actualizar
-el repositorio. Después de la primera instalación, cerrá por completo Claude
-Code y VS Code y volvé a abrirlos para que carguen la variable nueva.
+Para probar una instalación sin tocar tu configuración real, usá
+`CLAUDE_CONFIG_DIR` y `CODEX_HOME` apuntando a un directorio temporal.
 
-## Actualización
+La versión 1 (runtime `orq`) está en el tag `v1-final`.
 
-```bash
-cd ClaudeGPT
-git pull
-npm install
-npm run build
-npm link
-orq init --dry-run
-orq init
-orq doctor
-```
+## Licencia
 
-`git pull` solo actualiza las fuentes. `npm run build` regenera los ejecutables
-nativos y `orq init` despliega la nueva versión de forma idempotente. Si la
-actualización cambia el runtime o la configuración de Claude en Windows, cerrá
-por completo Claude Code y VS Code y volvé a abrirlos; abrir únicamente otra
-conversación no recarga el entorno del proceso.
-
-¿Venís del kit PowerShell (V1)? `orq migrate` — respalda y reemplaza.
-Detalle, upgrade, uninstall y troubleshooting: [`INSTALL.md`](INSTALL.md).
-
-### Instalación guiada desde Claude Code
-
-En la máquina nueva, abrí Claude Code en tu carpeta de proyectos y pegale esto.
-Sirve para instalar y para actualizar.
-
-```text
-Instalá el Orquestador V2. Seguí estos pasos en orden, uno por uno, sin planificar
-ni improvisar. No edites a mano settings.json, hooks.json, config.toml ni archivos
-de MCP: todo lo hace `orq`. Nunca uses una API key de Codex. Nunca hagas git push.
-Si un paso falla, pará y mostrame el error textual; no pruebes alternativas.
-
-1. Corré `node --version`, `git --version` y `claude --version`.
-   Si Node es menor a 22.16 o falta alguno, pará y decime qué instalar.
-   Corré `codex --version`: si no está, seguí igual (queda en modo Claude-solo).
-2. Si ya existe la carpeta `ClaudeGPT` acá, entrá y corré `git pull`.
-   Si no, corré `git clone https://github.com/Javier12301/ClaudeGPT.git` y entrá.
-   El repo es privado: si el clone pide credenciales o dice "not found", pará y
-   decime que corra `gh auth login` (o que inicie sesión en GitHub) y te avise.
-3. Corré `npm install`, después `npm run build`, después `npm link`.
-4. Corré `orq --help`. Si dice que `orq` no existe, desde acá en adelante usá
-   `node dist/cli.js` en lugar de `orq` y avisame al final.
-5. Corré `orq init --dry-run`. Si la salida dice "Instalacion V1", corré
-   `orq migrate`. Si no, corré `orq init`.
-6. Corré `orq doctor` y mostrame completas las líneas [warn] y [fail].
-   Si alguna dice `codex login`, decime que lo corra yo (es interactivo).
-7. Terminá diciéndome que cierre por completo Claude Code y VS Code y vuelva a
-   abrirlos. Una conversación nueva no basta para recargar
-   `CLAUDE_CODE_GIT_BASH_PATH`.
-```
-
-### Instalación guiada desde Codex, sin Claude Code
-
-Codex tiene su propio camino completo. Este prompt instala el runtime, la skill
-`orquestador`, el bloque global de `AGENTS.md`, los custom agents, rules, hooks y
-Codegraph del lado Codex. Claude Code es opcional.
-
-```text
-Instalá el Orquestador V2 para usarlo desde Codex standalone. Seguí estos pasos
-en orden, sin planificar ni editar a mano hooks.json, config.toml, AGENTS.md ni
-archivos MCP: todo lo hace `orq`. Nunca uses una API key, flags de bypass, git
-push ni git commit. Si un paso falla, pará y mostrame el error textual.
-
-1. Corré `node --version`, `git --version` y `codex --version`.
-   Node debe ser >= 22.16. Si falta Codex, pará y decime qué instalar.
-   Corré `codex doctor --summary`. Si la autenticación no es ChatGPT, decime que
-   ejecute `codex login`; no intentes iniciar sesión por mí.
-2. Si ya existe la carpeta `ClaudeGPT`, entrá y corré `git pull`. Si no, cloná
-   `https://github.com/Javier12301/ClaudeGPT.git` y entrá. Si el repo privado no
-   abre, pará y pedime autenticar GitHub.
-3. Corré `npm install`, `npm run build` y `npm link`, en ese orden.
-4. Corré `orq --help`. Si no está en PATH, usá `node dist/cli.js` para los pasos
-   restantes y avisame al final.
-5. Corré `orq init --dry-run`. Si detecta una instalación V1, corré
-   `orq migrate`; en caso contrario, corré `orq init`.
-6. Corré `orq doctor` y mostrame todas las líneas [warn] y [fail]. Si Claude Code
-   no está instalado, su warning es esperado y Codex sigue funcionando solo.
-7. Abrí una sesión interactiva nueva de Codex, ejecutá `/hooks` y revisá
-   `~/.codex/hooks.json` para confiar su hash. No uses
-   `--dangerously-bypass-hook-trust`.
-8. En esa sesión escribí `Trabajá como Orquestador`. Verificá que la skill cargue
-   y que una tarea trivial use DIRECT con cero subagentes.
-```
-
-## Cómo se usa
-
-En Claude Code o Codex interactivo: *"Trabajá como Orquestador"*. En Codex, la
-skill instalada lo mantiene como único razonador y Tech Lead aun si Claude Code
-no está disponible. DIRECT es el default; los subagentes nativos se reservan
-para aislamiento, independencia, volumen, especialización, exploración amplia o
-paralelismo con beneficio concreto.
-
-| Topología | Cuándo | Cómo |
-|---|---|---|
-| **DIRECT** | El default: cambios chicos, acoplados, o donde delegar cuesta más | El razonador |
-| **DELEGATED** | Una unidad grande o mecánica contra un contrato congelado | Subagente nativo estrecho, o `orq run --role constructor --reason volume` |
-| **ASYNC_REVIEW** | Review adversarial de algo ya verde mientras seguís | Un `reviewer` nativo o `orq run --role reviewer --reason independence --background` (tope: 1 por tarea) |
-| **PARALLEL** | Dos unidades sin archivos en común | `orq worktree add <nombre>` si las dos escriben |
-
-Checkpoints: `orq checkpoint fast` (los checks del repo, bloquea si falla) y
-`orq checkpoint deep` (+ review adversarial, para auth, pagos, contratos…).
-Planes con fases y dependencias `hard`/`soft`/`independent`: `orq plan check`.
-
-### Ejemplo — "Implementá recuperación de contraseña"
-
-```
-[orq] Presupuesto: estado CODEX-PREFERRED | Codex GO (80% libre) | Claude 5h 58%
-
-Razonador: 2 preguntas (¿mail o SMS? ¿expiración?) · orq codeintel impact src/auth
-Plan: p1 contrato+RED (tester Claude, independence) -> p2 GREEN (Codex, volume)
-      -> p3 UI (DIRECT)     p2 depende hard de p1; p3 soft de p2
-
-tester (Sonnet)                       -> 9 RED
-orq run --role constructor --reason volume  -> 6 archivos, GREEN
-orq checkpoint fast                   -> PASS
-orq run --role security-reviewer --reason independence --background --task auth-reset
-razonador sigue con p3 (UI) mientras Codex revisa
-orq jobs <id>  -> [P1] token sin rate limit (evidencia: 50 requests en 1 s)
-                  [P2] log con email
-Arbitraje: P1 real -> fix directo; P2 descartado, el logger redacta (logger.ts:88)
-orq metrics --finding accepted|rejected ...
-```
-
-### Ejemplo — "Renombrá `usr` a `user` en session.ts"
-
-```
-El razonador edita el archivo. Fin.
-orq metrics --decision not_delegated --reason too_small
-```
-
-## Qué mide
-
-`orq metrics` — por sesión: si el gate corrió, delegaciones con su motivo y las
-decisiones de **no** delegar, subagentes con duración real, delegaciones a Codex,
-findings aceptados/rechazados, suites completas contra dirigidas, fricciones. Si
-el log no registró la sesión, lo dice en vez de reportar ceros.
-`orq metrics --feedback` arma el informe de cierre.
-
-## Documentación
-
-- [`docs/SYSTEM.md`](docs/SYSTEM.md) — cómo funciona hoy: reglas, arquitectura, flujos, datos, seguridad.
-- [`docs/DECISIONS.md`](docs/DECISIONS.md) — por qué y trade-offs de V2.
-- [`docs/ROADMAP.md`](docs/ROADMAP.md) — qué falta.
-- [`INSTALL.md`](INSTALL.md) — instalación, upgrade, uninstall, doctor, troubleshooting.
-- [`CHANGELOG.md`](CHANGELOG.md).
-
-Todo cambio de comportamiento actualiza `docs/SYSTEM.md` (y `DECISIONS.md` si
-trae una decisión) y `CHANGELOG.md` en el mismo diff.
+MIT

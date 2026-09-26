@@ -2,10 +2,31 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
-Toda feature nueva del orquestador entra acá y actualiza la sección
-correspondiente de [`docs/SYSTEM.md`](docs/SYSTEM.md) en el mismo diff.
+## [2.0.0] — marketplace de plugins
 
-## [Unreleased]
+### Changed
+
+- ClaudeGPT pasa a ser un marketplace de Claude Code (`claudegpt`). El transporte a
+  Codex queda en el plugin oficial `openai/codex-plugin-cc`.
+
+### Added
+
+- Skill manual `/claudegpt:orquestador`: planificación por fases, ruteo entre Claude
+  directo, subagentes Sonnet y Codex, reviews incrementales, `IMPLEMENTATION.md` y
+  `HANDOFF.md`, política de docs y de compact, `continuar`.
+- `codex-review.mjs`: lanza `/codex:review` y el adversarial a través del companion
+  instalado, con respaldo manual.
+- Plugin opcional `claudegpt-notify` (Windows y Linux).
+- `setup/install.ps1`, `setup/install.sh` y `setup/codex-config.toml`.
+
+### Removed
+
+- El runtime `orq` completo (CLI, hooks, launcher `orq-hidden`, statusline, cuotas,
+  telemetría, worktrees), `kit/`, `legacy/` y la documentación de la v1. Todo queda
+  en el tag `v1-final`.
+- Soporte para macOS.
+
+## [Unreleased v1] — congelado en `v1-final`
 
 ### Added
 

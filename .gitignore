@@ -1,11 +1,8 @@
-# Estado operacional del orquestador en el repo (maquina-local, no versionado).
+# Estado local de la v1 que puede seguir en máquinas viejas.
 .orquestador/
-# Indice de code intelligence (codegraph).
+# Índice de code intelligence (codegraph).
 .codegraph/
-# Residuos de herramientas externas que V2 no administra.
+# Residuos de herramientas externas.
 .serena/
 .engram/
 .atl/.skill-registry.cache.json
-# Build y dependencias.
-node_modules/
-dist/
