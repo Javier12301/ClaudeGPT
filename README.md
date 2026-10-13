@@ -45,6 +45,18 @@ codex app-server daemon update                       # daemon de Codex (misma ve
 Orca se actualiza desde la propia app. Para desinstalar ClaudeGPT:
 `npx skills remove claudegpt -g`.
 
+**¿Venís de la v2 (plugin `/claudegpt:orquestador`)?** Quitá el plugin viejo; si no, Claude
+Code muestra el error `Failed to load marketplace "claudegpt"`:
+
+```bash
+claude plugin uninstall claudegpt@claudegpt
+claude plugin uninstall claudegpt-notify@claudegpt   # si lo tenías
+claude plugin marketplace remove claudegpt
+```
+
+El plugin `codex@openai-codex` ya no hace falta para ClaudeGPT; podés dejarlo si usás sus
+comandos `/codex:*`.
+
 ---
 
 ## Herramientas recomendadas
