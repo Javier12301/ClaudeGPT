@@ -9,34 +9,68 @@ Funciona en **Windows y Linux**.
 
 ---
 
-## Qué necesitás
+## Instalación rápida
 
-| Herramienta | Para qué |
-|---|---|
-| Un agente con soporte de skills: **Claude Code** (Tech Lead por defecto) o **Codex** | Donde corre la skill |
-| **Node.js 18+** | `npx skills` |
-| **[Orca](https://github.com/stablyai/orca)** abierto | Lanzar y supervisar agentes que no son Codex |
-| **Codex CLI** (`npm i -g @openai/codex@latest`, `codex login`) | Tests, tareas delegadas y reviews |
-| Opcionales: OpenCode, Gemini u otros agentes de Orca | Si los vas a pedir como ejecutores |
+**1. Lo imprescindible**
+
+| Herramienta | Para qué | Instalación |
+|---|---|---|
+| **Node.js 18+** | `npx` para instalar skills | https://nodejs.org |
+| **Claude Code** (o Codex) | Donde corre la skill | https://claude.com/claude-code |
+| **Orca** | Lanza y supervisa los demás agentes | https://github.com/stablyai/orca (releases) |
+| **Codex CLI** | Tests, tareas delegadas y reviews | `npm i -g @openai/codex@latest` y después `codex login` |
+
+**2. ClaudeGPT y las skills de Orca**
+
+```bash
+npx skills add Javier12301/ClaudeGPT --skill claudegpt -g -a claude-code codex -y
+orca skills install --skill orca-cli --skill orchestration
+```
+
+En Linux, fuera de una terminal de Orca, usá `orca-ide` en vez de `orca`.
+No toca ninguna configuración tuya: solo copia las skills.
+
+**3. Reiniciá tu agente** y probá: `/claudegpt <requerimiento>`.
 
 ---
 
-## Instalación
+## Actualizar
 
 ```bash
-# Skills oficiales de Orca (si todavía no las tenés).
-# En Linux, fuera de una terminal de Orca, usá orca-ide en vez de orca.
-orca skills install --skill orca-cli --skill orchestration
-
-# ClaudeGPT, global, para Claude Code y Codex
-npx skills add Javier12301/ClaudeGPT --skill claudegpt -g -a claude-code codex -y
+npx skills update claudegpt -g                       # ClaudeGPT
+npm i -g @openai/codex@latest                        # Codex CLI
+codex app-server daemon update                       # daemon de Codex (misma versión que el CLI)
 ```
 
-La instalación no toca ninguna configuración tuya; solo copia la skill.
+Orca se actualiza desde la propia app. Para desinstalar ClaudeGPT:
+`npx skills remove claudegpt -g`.
 
-**Actualizar:** `npx skills update claudegpt -g` · **Desinstalar:** `npx skills remove claudegpt -g`
+---
 
-Desde un clon local: `npx skills add <ruta-al-clon> --skill claudegpt -g -a claude-code codex -y`.
+## Herramientas recomendadas
+
+Ninguna es obligatoria: la skill las usa si están y sigue sin ellas. Mejoran mucho el
+flujo porque el agente gasta menos contexto y trabaja con información actualizada.
+
+| Herramienta | Qué aporta | Instalación |
+|---|---|---|
+| **[CodeGraph](https://github.com/colbymchenry/codegraph)** | Mapa del código consultable: el agente encuentra símbolos y llamadas sin leer archivos enteros ni levantar exploradores | `npm i -g @colbymchenry/codegraph` → `codegraph install` (conecta tus agentes) → `codegraph init` en cada repo |
+| **[Engram](https://github.com/Gentleman-Programming/engram)** | Memoria entre sesiones: decisiones, preferencias y hallazgos no se pierden | Binario desde [releases](https://github.com/Gentleman-Programming/engram/releases) (en el PATH) → `engram setup claude-code` y `engram setup codex` |
+| **[Context7](https://github.com/upstash/context7)** | Documentación de librerías al día, en vez de lo que el modelo recuerda | `npx ctx7 setup` o `claude mcp add --scope user --transport http context7 https://mcp.context7.com/mcp` · Codex: `codex mcp add context7 --url https://mcp.context7.com/mcp` |
+| **[Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp)** | Probar interfaces en desktop y mobile, ver network y consola | `claude mcp add --scope user chrome-devtools -- npx -y chrome-devtools-mcp@latest` · Codex: `codex mcp add chrome-devtools -- npx -y chrome-devtools-mcp@latest` |
+| **[OpenCode](https://opencode.ai)** | Ejecutor con modelos económicos o gratuitos para datos y tareas mecánicas | `npm i -g opencode-ai` |
+| **find-skills** | Buscar skills especializadas cuando hacen falta | `npx skills add vercel-labs/skills --skill find-skills -g -y` |
+
+---
+
+## Configurar Orca (una sola vez)
+
+En **Orca → Settings → Agents**:
+
+- **Permisos: Manual.** En Yolo, Orca lanza los agentes sin sandbox ni confirmaciones.
+- **Activá** los agentes que vayas a usar (Codex, OpenCode, Gemini…).
+- Si un agente no arranca, mirá su terminal en Orca: suele ser un aviso de actualización
+  o un login vencido.
 
 ---
 
@@ -59,8 +93,7 @@ por rol, fase o tarea, con cualquier agente que Orca soporte. Si pedís uno que 
 instalado, la skill te avisa y te ofrece una alternativa; nunca lo cambia en silencio.
 
 Flujo: requerimiento → preguntas solo de lo que falta → investigación → plan por fases →
-**tu aprobación** → ejecución → validación → reviews → cierre. Cada fase tiene ejecutor,
-validación, criterio de done y commit.
+**tu aprobación** → ejecución → validación → reviews → cierre.
 
 Para retomar después de un corte o en otra sesión: `/claudegpt continuar`.
 
@@ -81,14 +114,13 @@ Para retomar después de un corte o en otra sesión: `/claudegpt continuar`.
 | Tech Lead | El agente donde invocaste la skill |
 | Codex (implementar, testear) | `codex exec` con sandbox `workspace-write` |
 | Codex (review) | `codex review` (usa la skill oficial `review-agent` de OpenAI) |
-| OpenCode, Gemini, Claude y otros | Workers supervisados de Orca (`orca orchestration worker-start`) |
+| OpenCode, Gemini, Claude y otros | Workers supervisados de Orca |
 
 Codex no va como worker de Orca porque en Windows, con sandbox, no puede avisar que
 terminó ([stablyai/orca#13539](https://github.com/stablyai/orca/issues/13539)).
 
-Estado de una implementación en el repo que se orquesta: `IMPLEMENTATION.md` (plan y
-fases), `HANDOFF.md` (solo para retomar) y `/docs` (conocimiento estable). Lo operativo
-de los workers lo guarda Orca.
+En el repo que se orquesta quedan `IMPLEMENTATION.md` (plan y fases), `HANDOFF.md`
+(solo para retomar) y `/docs` (conocimiento estable).
 
 ---
 
@@ -97,9 +129,9 @@ de los workers lo guarda Orca.
 | Síntoma | Qué hacer |
 |---|---|
 | `/claudegpt` no aparece | `npx skills ls -g` debe listar `claudegpt`; reiniciá el agente |
-| Codex muestra "Background server has incompatible feature settings" | CLI y daemon en versiones distintas: `npm i -g @openai/codex@latest` y `codex app-server daemon update` |
-| Un worker de Orca no arranca (`agent_readiness`) | Mirá su terminal en Orca: suele ser un aviso de update o un login vencido del agente |
-| Orca agrega flags duplicadas a un agente | Orca → Settings → Agents: revisá permisos y argumentos por defecto |
+| Codex muestra "Background server has incompatible feature settings" | CLI y daemon en versiones distintas: corré los comandos de **Actualizar** |
+| Un worker de Orca no arranca | Mirá su terminal en Orca (aviso de update, login vencido) |
+| Orca agrega flags duplicadas o lanza agentes sin sandbox | Orca → Settings → Agents: permisos en Manual |
 
 ---
 
