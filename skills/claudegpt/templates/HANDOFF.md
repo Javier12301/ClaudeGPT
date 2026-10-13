@@ -1,6 +1,6 @@
-# HANDOFF — retomar con: /claudegpt:orquestador continuar
+# HANDOFF — retomar con: /claudegpt continuar
 
-Objetivo: … · Fase activa: F<n> — … · Rama / último commit: <rama> / <sha>
+Objetivo: … · Fase activa: F<n> — … · Rama / último commit: <rama> / <sha> · Orca run: <run_id | —>
 
 ## Terminado
 

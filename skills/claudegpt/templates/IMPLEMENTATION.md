@@ -1,7 +1,7 @@
 # <Feature/versión> — IMPLEMENTATION
 
 Estado: planificada | en curso | cerrada · Rama: <rama> · Base: <ref>
-Punto de reanudación: F<n> — <próxima acción concreta> · último commit <sha>
+Punto de reanudación: F<n> — <próxima acción concreta> · último commit <sha> · Orca run: <run_id | —> · dispatches abiertos: <ids | —> · en background: <codex exec → log/PID | —>
 
 ## Objetivo
 
@@ -13,7 +13,7 @@ Punto de reanudación: F<n> — <próxima acción concreta> · último commit <s
 
 ## Preferencias de trabajo
 
-<Lo que declaró el usuario; manda sobre las reglas. Ej.: tests=Codex, review=Codex, implementación=a criterio.>
+<Lo que declaró el usuario, por rol/fase/tarea; manda sobre las reglas. Ej.: tester=codex, review=codex, datos=opencode (modelo económico), implementación=a criterio. Agentes verificados: …>
 
 ## Fuera de alcance
 
@@ -40,7 +40,7 @@ Punto de reanudación: F<n> — <próxima acción concreta> · último commit <s
 
 ### F1 — <título>   [ ] pendiente
 
-- Ejecutor: claude-directo | subagente-sonnet | codex · Motivo: …
+- Ejecutor: directo | worker <agente>[/<modelo>] (rol) | script · Motivo: …
 - Validación: … · Done: …
 - Commits: —
 
@@ -48,7 +48,7 @@ Punto de reanudación: F<n> — <próxima acción concreta> · último commit <s
 
 ## Reviews
 
-| Tipo | --base | Fecha | Findings (aceptados / rechazados / pendientes) |
+| Tipo | Rango | Fecha | Findings (aceptados / rechazados / pendientes) |
 |---|---|---|---|
 
 ## Pendiente / siguiente

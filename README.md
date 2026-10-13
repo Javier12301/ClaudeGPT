@@ -1,154 +1,146 @@
 # ClaudeGPT
 
-Claude trabaja como **Tech Lead**: investiga, pregunta, arma un plan por fases y reparte
-el trabajo entre él mismo, subagentes Sonnet y **Codex**. Se activa **solo cuando lo
-llamás** con `/claudegpt:orquestador`. El resto del tiempo, Claude Code funciona normal.
+Una skill que convierte a tu agente en **Tech Lead**: investiga, pregunta, arma un plan
+por fases y, solo cuando conviene, delega en otros agentes CLI (Codex, OpenCode, Gemini,
+Claude…) a través de [Orca](https://github.com/stablyai/orca). Se activa **solo cuando la
+llamás**; el resto del tiempo tu agente funciona normal.
 
 Funciona en **Windows y Linux**.
 
 ---
 
-## Qué necesitás
+## Instalación rápida
 
-| Herramienta | Para qué | Cómo se instala |
+**1. Lo imprescindible**
+
+| Herramienta | Para qué | Instalación |
 |---|---|---|
-| **Claude Code** | Donde corre todo | https://claude.com/claude-code |
-| **Git** | Clonar este repo | https://git-scm.com |
-| **Node.js 18 o más** | Lo necesita Codex | https://nodejs.org |
-| **Cuenta de ChatGPT** | Para iniciar sesión en Codex | — |
-| **Codex CLI** | El ejecutor externo | Lo instala el script del paso 2 |
-| **Plugin `codex`** (de OpenAI) | Conecta Claude Code con Codex | Paso 4 |
-| **Plugin `claudegpt`** (este repo) | El orquestador | Paso 5 |
-| Plugin `claudegpt-notify` | Notificación de escritorio (opcional) | Paso 5 |
+| **Node.js 18+** | `npx` para instalar skills | https://nodejs.org |
+| **Claude Code** (o Codex) | Donde corre la skill | https://claude.com/claude-code |
+| **Orca** | Lanza y supervisa los demás agentes | https://github.com/stablyai/orca (releases) |
+| **Codex CLI** | Tests, tareas delegadas y reviews | `npm i -g @openai/codex@latest` y después `codex login` |
 
----
-
-## Instalación en una máquina nueva
-
-**1. Clonar el repo**
+**2. ClaudeGPT y las skills de Orca**
 
 ```bash
-git clone https://github.com/Javier12301/ClaudeGPT.git
-cd ClaudeGPT
+npx skills add Javier12301/ClaudeGPT --skill claudegpt -g -a claude-code codex -y
+orca skills install --skill orca-cli --skill orchestration
 ```
 
-**2. Correr el instalador**
+En Linux, fuera de una terminal de Orca, usá `orca-ide` en vez de `orca`.
+No toca ninguna configuración tuya: solo copia las skills.
 
-Verifica Node, instala Codex CLI y crea la config de Codex (`~/.codex/config.toml`).
-Si esa config ya existe, no la toca.
-
-- Windows (PowerShell):
-  ```powershell
-  powershell -ExecutionPolicy Bypass -File setup\install.ps1
-  ```
-- Linux:
-  ```bash
-  bash setup/install.sh
-  ```
-
-**3. Iniciar sesión en Codex** (se abre el navegador; entrá con tu cuenta de ChatGPT)
-
-```bash
-codex login
-```
-
-**4. En Claude Code: instalar el plugin de Codex**
-
-```
-/plugin marketplace add openai/codex-plugin-cc
-/plugin install codex@openai-codex
-```
-
-**5. En Claude Code: instalar ClaudeGPT**
-
-```
-/plugin marketplace add Javier12301/ClaudeGPT
-/plugin install claudegpt@claudegpt
-/plugin install claudegpt-notify@claudegpt
-```
-
-La última línea es opcional: sirve para recibir una notificación cuando Claude termina.
-
-**6. Recargar y verificar**
-
-```
-/reload-plugins
-/codex:setup
-```
-
-`/codex:setup` tiene que decir que Codex está listo y con la sesión iniciada.
-**No** actives el "review gate" que te ofrece: el orquestador decide cuándo revisar.
-
-Listo.
-
----
-
-## Cómo se usa
-
-Escribí `/claudegpt:orquestador`, seguido de lo que querés y, si querés, de quién hace qué:
-
-```
-/claudegpt:orquestador Agregar login con Google. Tests: Codex. Review: Codex. Implementación: decidí vos.
-```
-
-También podés pasarle un archivo con el análisis:
-
-```
-/claudegpt:orquestador docs/analisis-login.md
-```
-
-Qué pasa después:
-
-1. **Investiga y pregunta.** Arranca en modo plan, lee el código y te hace preguntas hasta cerrar las dudas.
-2. **Te muestra el plan.** Incluye qué se puede hacer, qué no y los riesgos, dividido en fases, con quién hace cada una.
-3. **Vos aprobás.** Guarda el plan en `IMPLEMENTATION.md` y empieza.
-4. **Trabaja fase por fase.** Hace un commit por cada bloque terminado y pide reviews a Codex cuando conviene. **Nunca hace `git push`.**
-5. **Si la conversación se vuelve muy larga,** guarda el estado y te sugiere hacer `/compact`.
-
-**Para seguir otro día, o después de un `/compact`:**
-
-```
-/claudegpt:orquestador continuar
-```
-
-Lee `HANDOFF.md` e `IMPLEMENTATION.md` y sigue donde había quedado.
+**3. Reiniciá tu agente** y probá: `/claudegpt <requerimiento>`.
 
 ---
 
 ## Actualizar
 
+```bash
+npx skills update claudegpt -g                       # ClaudeGPT
+npm i -g @openai/codex@latest                        # Codex CLI
+codex app-server daemon update                       # daemon de Codex (misma versión que el CLI)
 ```
-/plugin marketplace update claudegpt
-/reload-plugins
-```
+
+Orca se actualiza desde la propia app. Para desinstalar ClaudeGPT:
+`npx skills remove claudegpt -g`.
 
 ---
 
-## Si algo falla
+## Herramientas recomendadas
 
-| Problema | Solución |
+Ninguna es obligatoria: la skill las usa si están y sigue sin ellas. Mejoran mucho el
+flujo porque el agente gasta menos contexto y trabaja con información actualizada.
+
+| Herramienta | Qué aporta | Instalación |
+|---|---|---|
+| **[CodeGraph](https://github.com/colbymchenry/codegraph)** | Mapa del código consultable: el agente encuentra símbolos y llamadas sin leer archivos enteros ni levantar exploradores | `npm i -g @colbymchenry/codegraph` → `codegraph install` (conecta tus agentes) → `codegraph init` en cada repo |
+| **[Engram](https://github.com/Gentleman-Programming/engram)** | Memoria entre sesiones: decisiones, preferencias y hallazgos no se pierden | Binario desde [releases](https://github.com/Gentleman-Programming/engram/releases) (en el PATH) → `engram setup claude-code` y `engram setup codex` |
+| **[Context7](https://github.com/upstash/context7)** | Documentación de librerías al día, en vez de lo que el modelo recuerda | `npx ctx7 setup` o `claude mcp add --scope user --transport http context7 https://mcp.context7.com/mcp` · Codex: `codex mcp add context7 --url https://mcp.context7.com/mcp` |
+| **[Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp)** | Probar interfaces en desktop y mobile, ver network y consola | `claude mcp add --scope user chrome-devtools -- npx -y chrome-devtools-mcp@latest` · Codex: `codex mcp add chrome-devtools -- npx -y chrome-devtools-mcp@latest` |
+| **[OpenCode](https://opencode.ai)** | Ejecutor con modelos económicos o gratuitos para datos y tareas mecánicas | `npm i -g opencode-ai` |
+| **find-skills** | Buscar skills especializadas cuando hacen falta | `npx skills add vercel-labs/skills --skill find-skills -g -y` |
+
+---
+
+## Configurar Orca (una sola vez)
+
+En **Orca → Settings → Agents**:
+
+- **Permisos: Manual.** En Yolo, Orca lanza los agentes sin sandbox ni confirmaciones.
+- **Activá** los agentes que vayas a usar (Codex, OpenCode, Gemini…).
+- Si un agente no arranca, mirá su terminal en Orca: suele ser un aviso de actualización
+  o un login vencido.
+
+---
+
+## Uso
+
+En Claude Code `/claudegpt`, en Codex `$claudegpt`:
+
+```text
+/claudegpt Implementar importación masiva de productos.
+
+Preferencias:
+- Implementación: decidí vos
+- Tester: Codex
+- Review: Codex
+- Generación de categorías: OpenCode
+```
+
+Las preferencias son opcionales y mandan sobre el criterio del Tech Lead. Se pueden dar
+por rol, fase o tarea, con cualquier agente que Orca soporte. Si pedís uno que no está
+instalado, la skill te avisa y te ofrece una alternativa; nunca lo cambia en silencio.
+
+Flujo: requerimiento → preguntas solo de lo que falta → investigación → plan por fases →
+**tu aprobación** → ejecución → validación → reviews → cierre.
+
+Para retomar después de un corte o en otra sesión: `/claudegpt continuar`.
+
+### Reglas que siempre se cumplen
+
+- Commits por unidad lógica, **sin `Co-Authored-By`** ni trailers de atribución.
+- **Nunca `git push`.**
+- Delegar solo cuando conviene; nada de levantar agentes porque sí.
+- Quien implementa no escribe los tests que lo validan ni se revisa a sí mismo.
+- Review de Codex con `codex review`; los findings los arbitra el Tech Lead.
+
+---
+
+## Cómo funciona por dentro
+
+| Ejecutor | Vía |
 |---|---|
-| `/claudegpt:orquestador` no aparece | `/reload-plugins`, y revisá que `/plugin` muestre `claudegpt` instalado |
-| Codex dice que no hay sesión | `codex login` en una terminal |
-| El review de Codex no arranca solo | El orquestador te muestra el comando para escribirlo a mano (por ejemplo `/codex:review --base main`) |
-| En Windows se abren ventanas de consola con Codex | Volvé a la versión estable: en `setup/install.ps1`, `$CODEX_VERSION_WINDOWS` tiene la última versión verificada; volvé a correr el instalador |
-| La notificación molesta o da problemas | `/plugin uninstall claudegpt-notify@claudegpt` (el orquestador no la necesita) |
+| Tech Lead | El agente donde invocaste la skill |
+| Codex (implementar, testear) | `codex exec` con sandbox `workspace-write` |
+| Codex (review) | `codex review` (usa la skill oficial `review-agent` de OpenAI) |
+| OpenCode, Gemini, Claude y otros | Workers supervisados de Orca |
+
+Codex no va como worker de Orca porque en Windows, con sandbox, no puede avisar que
+terminó ([stablyai/orca#13539](https://github.com/stablyai/orca/issues/13539)).
+
+En el repo que se orquesta quedan `IMPLEMENTATION.md` (plan y fases), `HANDOFF.md`
+(solo para retomar) y `/docs` (conocimiento estable).
 
 ---
 
-## Detalles técnicos
+## Problemas comunes
 
-- **Reviews automáticos:** `/codex:review` solo se puede invocar a mano. Para lanzarlo
-  solo, `plugins/claudegpt/scripts/codex-review.mjs` busca el plugin de Codex instalado
-  y lo llama directo. Esto depende de cómo está armado internamente el plugin de Codex:
-  si cambia, el orquestador se detiene y te pide el comando manual. Nunca saltea el review.
-- **Versión de Codex:** en Windows se usa la última versión probada sin ventanas
-  (`$CODEX_VERSION_WINDOWS`, hoy 0.157.1). Subila solo después de probar una nueva. En
-  Linux se instala la última (`latest`).
-- **Estructura:** `plugins/claudegpt/` (skill y wrapper de review),
-  `plugins/claudegpt-notify/` (opcional), `setup/` (instaladores y config de Codex),
-  `docs/decisions.md` (por qué está hecho así).
-- **Tests:** `node --test "plugins/*/test/*.test.mjs"` y `claude plugin validate .`
-- **Versión anterior** (runtime `orq`): tag `v1-final`.
+| Síntoma | Qué hacer |
+|---|---|
+| `/claudegpt` no aparece | `npx skills ls -g` debe listar `claudegpt`; reiniciá el agente |
+| Codex muestra "Background server has incompatible feature settings" | CLI y daemon en versiones distintas: corré los comandos de **Actualizar** |
+| Un worker de Orca no arranca | Mirá su terminal en Orca (aviso de update, login vencido) |
+| Orca agrega flags duplicadas o lanza agentes sin sandbox | Orca → Settings → Agents: permisos en Manual |
+
+---
+
+## Estructura
+
+- `skills/claudegpt/` — la skill (`SKILL.md`, `references/delegacion.md`, plantillas,
+  `agents/openai.yaml` para Codex).
+- `docs/decisions.md` — por qué está hecho así.
+- Versiones anteriores: tag `v1-final` (runtime `orq`) y el historial de la v2 (plugin de
+  Claude Code sobre `codex-plugin-cc`).
 
 Licencia MIT.
