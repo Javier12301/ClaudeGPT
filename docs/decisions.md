@@ -1,60 +1,75 @@
 # Decisiones vigentes
 
-Estado actual del diseño. Lo que describe la v1 (runtime `orq`) está en el tag `v1-final`.
+Estado actual del diseño (v3). La v1 (runtime `orq`) está en el tag `v1-final`; la v2
+(plugin de Claude Code sobre `codex-plugin-cc`), en el historial.
 
-## Codex solo a través del plugin oficial
+## Una skill independiente, no un plugin
 
-ClaudeGPT no lanza ni administra procesos de Codex. Todo pasa por
-`openai/codex-plugin-cc`: `codex:rescue` para delegar y el companion del plugin para
-los reviews. Así desaparecen el launcher nativo, los hooks propios y la gestión de
-procesos que tenía la v1.
+ClaudeGPT es la skill `claudegpt` y se instala con `npx skills add` (el mismo ecosistema
+que usa Orca para sus skills y que `find-skills`). Así se instala igual para Claude Code
+y Codex, se actualiza aparte de Orca y no modifica configuraciones del usuario. No hay
+scripts de instalación: no aportaban nada que `npx skills` no cubra.
 
-## La skill se invoca solo a mano
+## Solo invocación manual
 
-`disable-model-invocation: true`. El comando es `/claudegpt:orquestador`, porque
-Claude Code siempre antepone el nombre del plugin a sus componentes. Fuera de esa
-invocación, Claude trabaja sin fases, sin documentos y sin delegar automáticamente.
+Claude: `disable-model-invocation: true` → `/claudegpt`. Codex:
+`agents/openai.yaml` con `policy.allow_implicit_invocation: false` → `$claudegpt`.
+Fuera de esa invocación el agente trabaja sin fases, sin documentos y sin delegar.
+OpenCode no tiene flag equivalente; la description lo pide de forma explícita.
 
-## Review automático con wrapper y respaldo manual
+## Orca es el runtime; nada propio
 
-`/codex:review` y `/codex:adversarial-review` tienen `disable-model-invocation`.
-`scripts/codex-review.mjs` ubica el companion del plugin (primero en
-`installed_plugins.json`, después en el cache con la versión semver más alta) y lo
-invoca con la misma forma que esos comandos. Si no lo encuentra, sale con 3 y la skill
-le pide al usuario el comando manual. Depende de la estructura interna del plugin.
-El review gate del plugin no se activa nunca.
+Procesos, terminales, worktrees, mensajería y estado de workers son de Orca. La skill no
+copia sus flags: manda a cargar `orca skills get orchestration` (la guía del binario
+instalado) y fija solo el ciclo mínimo y los hechos verificados. Orca no valida que el
+CLI de un agente exista, así que la skill lo verifica antes de delegar.
 
-## Dos documentos operativos y /docs estable
+## Codex por su CLI, no como worker de Orca
 
-`IMPLEMENTATION.md` cumple a la vez de plan y de estado, e incluye un Punto de
-reanudación. `HANDOFF.md` solo se escribe cuando se prevé un compact o un cambio de
-sesión. `/docs` guarda el conocimiento estable del proyecto que se orquesta. No existe
-un comando `/fase`: con `continuar` y esos dos documentos alcanza.
+En Windows, un worker Codex con sandbox no puede escribir en el named pipe del runtime
+de Orca y nunca entrega `worker_done` (stablyai/orca#13539; en macOS #22947). Correrlo
+sin sandbox no es aceptable. Por eso Codex implementa y testea con
+`codex exec -s workspace-write -o <archivo>` y revisa con `codex review`: el fin del
+proceso es la señal de terminado. Si ese issue se cierra, Codex puede volver a
+`worker-start`.
 
-## SKILL.md corto
+## Reviews con `codex review`
 
-Después de un compact, Claude Code vuelve a adjuntar solo los primeros 5.000 tokens
-de cada skill invocada. SKILL.md queda por debajo de ese límite, con lo crítico
-arriba. La plantilla de spec para Codex y las plantillas de documentos se cargan
-bajo demanda.
+Es el CLI oficial y aplica la skill de sistema `review-agent` de OpenAI (findings P0–P3
+con archivo:línea). Reemplaza al wrapper sobre los internals de `codex-plugin-cc`.
+`--base` no admite instrucciones: el adversarial pasa el rango y el foco en el texto.
 
-## Notificaciones en un plugin aparte
+## Nunca esperar a ciegas
 
-`claudegpt-notify` es opcional y se puede desinstalar sin afectar al orquestador. En
-Windows lanza `powershell.exe` con `windowsHide` y sin `detached` (en Windows,
-`detached` le crea consola propia al hijo), espera hasta 8 s como máximo y siempre sale
-con 0.
+Toda espera tiene timeout y corre en background con aviso al terminar; si algo no avanza
+se mira su salida. Viene de la PoC: un worker que no puede reportar deja al coordinador
+esperando indefinidamente.
 
-## Versiones de Codex
+## Versiones de Codex: la última, con CLI y daemon alineados
 
-- Windows: la versión estable verificada, en una variable de `install.ps1`.
-- Linux: `latest`.
-- No hay soporte para macOS.
+Ya no se fija una versión en Windows. Se actualiza con `npm i -g @openai/codex@latest` y
+`codex app-server daemon update`. Si el CLI y su daemon quedan en versiones distintas,
+cada sesión abre un menú de "incompatible feature settings" que traba a un agente
+desatendido.
 
-## Sin `version` en los manifests
+## Documentos: dos operativos y /docs estable
 
-Los plugins no declaran `version`, ni en `plugin.json` ni en `marketplace.json`, para
-que las instalaciones desde GitHub reciban cada commit con
-`/plugin marketplace update claudegpt`. Con una versión fija, los cambios nuevos no
-llegan hasta que se sube el número. `claude plugin validate` avisa de la falta de
-versión, y ese aviso se acepta.
+`IMPLEMENTATION.md` es plan y estado, con un Punto de reanudación que guarda el `run_id`
+de Orca, no una copia de su estado. `HANDOFF.md` solo se escribe antes de un compact o
+un cambio de sesión. `/docs` guarda el conocimiento estable del proyecto que se orquesta.
+
+## SKILL.md corto y una sola referencia
+
+Después de un compact, Claude Code vuelve a adjuntar solo los primeros 5.000 tokens de
+cada skill invocada. SKILL.md queda debajo de ese límite, con lo crítico arriba.
+`references/delegacion.md` se carga solo al delegar o revisar: si el Tech Lead resuelve
+directo, no paga ese contexto.
+
+## Herramientas opcionales
+
+CodeGraph, engram, Context7 y Chrome DevTools MCP se usan si están disponibles; nunca
+son requisito.
+
+## Sin plugin de notificaciones
+
+Orca ya notifica cuando un agente termina. `claudegpt-notify` se eliminó.

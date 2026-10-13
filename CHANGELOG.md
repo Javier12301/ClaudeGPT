@@ -2,6 +2,29 @@
 
 Formato [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 
+## [3.0.0] — skill sobre Orca
+
+### Changed
+
+- ClaudeGPT pasa a ser una skill independiente (`/claudegpt`, `$claudegpt`) que se
+  instala con `npx skills add` para Claude Code y Codex.
+- Orca es el runtime de los workers (OpenCode, Gemini, Claude…); Codex se usa por su
+  CLI (`codex exec`, `codex review`).
+- Codex sin versión fija: última versión, con CLI y daemon alineados.
+
+### Added
+
+- Preferencias por rol, fase o tarea con cualquier agente de Orca, verificando que esté
+  instalado antes de delegar.
+- Roles separados (el implementador no escribe los tests que lo validan), propuesta de
+  skills especializadas con `npx skills find`, regla de no esperar a ciegas.
+- `references/delegacion.md` con los hechos verificados de Orca y Codex.
+
+### Removed
+
+- Plugin de Claude Code `claudegpt`, marketplace, `codex-review.mjs`, dependencia de
+  `openai/codex-plugin-cc`, plugin `claudegpt-notify` e instaladores de `setup/`.
+
 ## [2.0.0] — marketplace de plugins
 
 ### Changed
