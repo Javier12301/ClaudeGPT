@@ -149,8 +149,11 @@ decisiones A/B, leer HANDOFF.md e IMPLEMENTATION.md; siguiente acción: X. Sesi�
 
 ## Reanudar (`continuar` o después de un compact)
 
-`HANDOFF.md` (si existe) → `IMPLEMENTATION.md` → si hay `run_id`: rebindeá el Run y
-listá sus workers (`references/delegacion.md`) para recuperar resultados ya entregados →
+`HANDOFF.md` (si existe) → `IMPLEMENTATION.md` → **trabajos en background anotados**
+(`codex exec`, workers de Orca): un `/clear` o un corte no los mata. Antes de relanzar
+nada, verificá si siguen vivos (proceso o log que crece) y esperalos o cortalos: nunca dos
+escritores sobre los mismos archivos → si hay `run_id`: rebindeá el Run y listá sus
+workers (`references/delegacion.md`) para recuperar resultados ya entregados →
 los docs indicados → solo el código imprescindible. Si HANDOFF y el Punto de reanudación
 discrepan, manda el más reciente (comparalo con `git log`).
 

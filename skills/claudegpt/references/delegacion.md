@@ -39,6 +39,9 @@ codex exec -s workspace-write -o <tmp>/codex-last.md - < <tmp>/spec.txt > <tmp>/
 ```
 
 - Corre en el directorio del repo (o del worktree) donde tiene que editar.
+- Anotá el log y el PID en el Punto de reanudación de `IMPLEMENTATION.md`. El proceso
+  sobrevive a un `/clear` o a un corte de sesión: al retomar, verificá si sigue vivo
+  antes de lanzar otro sobre los mismos archivos.
 - `-o` guarda solo el mensaje final: leé ese archivo, no el log, salvo que falle.
 - Modelo pedido por el usuario: `-m <modelo>`; esfuerzo: `-c model_reasoning_effort=<nivel>`.
 - Exit ≠ 0 o archivo vacío → leé el final del log y decidí (reintentar con spec

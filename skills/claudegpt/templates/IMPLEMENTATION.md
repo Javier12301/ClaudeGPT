@@ -1,7 +1,7 @@
 # <Feature/versión> — IMPLEMENTATION
 
 Estado: planificada | en curso | cerrada · Rama: <rama> · Base: <ref>
-Punto de reanudación: F<n> — <próxima acción concreta> · último commit <sha> · Orca run: <run_id | —> · dispatches abiertos: <ids | —>
+Punto de reanudación: F<n> — <próxima acción concreta> · último commit <sha> · Orca run: <run_id | —> · dispatches abiertos: <ids | —> · en background: <codex exec → log/PID | —>
 
 ## Objetivo
 
