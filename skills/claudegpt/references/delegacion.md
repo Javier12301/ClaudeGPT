@@ -187,7 +187,7 @@ codex review "<instrucciones>"     # adversarial con foco
 ```
 
 La salida incluye todo el transcript de Codex: redirigila a un archivo
-(`codex review … > <tmp>/review.txt 2>&1`) y leé solo el bloque final de findings
+(`codex review … > "<tmp>/review.txt" 2>&1`) y leé solo el bloque final de findings
 (desde la última línea `codex`), no el log completo.
 
 `--base` **no se combina** con instrucciones. Para el adversarial escribí el rango en el
