@@ -55,7 +55,8 @@ amplia, desconocida y sin índice. Nada de lecturas completas ni búsquedas repe
    construye y no está en la evidencia.
 3. **Informe de viabilidad:** qué se puede · qué no o qué cambia (con motivo) · riesgos ·
    baseline medido (`comando · pasados/fallados/omitidos`, nunca citado de memoria).
-4. **Agentes pedidos:** verificá cada uno (`command -v <cli>`). Orca **no** valida que el
+4. **Agentes pedidos:** verificá cada uno (`command -v <cli>` en bash/sh;
+   `Get-Command <cli>` en PowerShell). Orca **no** valida que el
    CLI exista. Si falta, decilo y ofrecé alternativa; **nunca sustituyas en silencio**.
 5. Fases con el formato de la plantilla IMPLEMENTATION: ejecutor + motivo, validación,
    criterio de done, commit. **Esperá aprobación.** Pedir aprobación del plan no es

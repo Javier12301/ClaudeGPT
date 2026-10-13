@@ -24,14 +24,14 @@ Funciona en **Windows y Linux**.
 ## Instalación
 
 ```bash
-# Skills oficiales de Orca (si todavía no las tenés)
+# Skills oficiales de Orca (si todavía no las tenés).
+# En Linux, fuera de una terminal de Orca, usá orca-ide en vez de orca.
 orca skills install --skill orca-cli --skill orchestration
 
 # ClaudeGPT, global, para Claude Code y Codex
 npx skills add Javier12301/ClaudeGPT --skill claudegpt -g -a claude-code codex -y
 ```
 
-En Linux, fuera de una terminal de Orca, el comando de Orca es `orca-ide`.
 La instalación no toca ninguna configuración tuya; solo copia la skill.
 
 **Actualizar:** `npx skills update claudegpt -g` · **Desinstalar:** `npx skills remove claudegpt -g`

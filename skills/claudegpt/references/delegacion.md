@@ -35,7 +35,13 @@ Escribí la spec en un archivo temporal fuera de lo que se commitea y lanzalo en
 background, con timeout:
 
 ```bash
+# bash / sh
 codex exec -s workspace-write -o <tmp>/codex-last.md - < <tmp>/spec.txt > <tmp>/codex-log.txt 2>&1
+```
+
+```powershell
+# PowerShell (no admite `<`)
+Get-Content -Raw <tmp>spec.txt | codex exec -s workspace-write -o <tmp>codex-last.md - *> <tmp>codex-log.txt
 ```
 
 - Corre en el directorio del repo (o del worktree) donde tiene que editar.
@@ -78,7 +84,7 @@ Lanzá toda la ola independiente antes de esperar. Agente pedido con modelo conc
 
 - **Orca no verifica que el CLI exista.** Con un agente no instalado, `worker-start`
   devuelve `ready` y el preámbulo se pega en una shell. Antes de delegar:
-  `command -v <cli>`. Si se coló igual: `worker-stop --dispatch <id>` enseguida.
+  `command -v <cli>` (bash) o `Get-Command <cli>` (PowerShell). Si se coló igual: `worker-stop --dispatch <id>` enseguida.
 - `check --wait --json` emite líneas de heartbeat (`{"_keepalive":true,…}`) antes del
   resultado: el resultado es **el último objeto JSON** de la salida.
 - `worker-start` que no llega a `ready` (p. ej. `failedStage: agent_readiness`) deja una
