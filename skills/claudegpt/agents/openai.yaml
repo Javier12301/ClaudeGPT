@@ -1,0 +1,5 @@
+interface:
+  display_name: "ClaudeGPT"
+  short_description: "Tech Lead por fases que delega en agentes CLI vía Orca"
+policy:
+  allow_implicit_invocation: false
