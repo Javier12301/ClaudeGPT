@@ -31,18 +31,23 @@ cerró, Codex puede volver a `worker-start`.
 
 ## Codex: `codex exec`
 
-Escribí la spec en un archivo temporal fuera de lo que se commitea y lanzalo en
-background, con timeout:
+Escribí la spec en un archivo temporal fuera de lo que se commitea y lanzalo con la
+ejecución en background de tu agente (en Claude Code, `run_in_background` + `timeout`),
+que avisa cuando el proceso termina. Rutas siempre entre comillas:
 
 ```bash
 # bash / sh
-codex exec -s workspace-write -o <tmp>/codex-last.md - < <tmp>/spec.txt > <tmp>/codex-log.txt 2>&1
+codex exec -s workspace-write -o "<tmp>/codex-last.md" - < "<tmp>/spec.txt" > "<tmp>/codex-log.txt" 2>&1
 ```
 
 ```powershell
 # PowerShell (no admite `<`)
-Get-Content -Raw <tmp>spec.txt | codex exec -s workspace-write -o <tmp>codex-last.md - *> <tmp>codex-log.txt
+Get-Content -Raw "<tmp>\spec.txt" | codex exec -s workspace-write -o "<tmp>\codex-last.md" - *> "<tmp>\codex-log.txt"
 ```
+
+Si tu agente no tiene ejecución en background, lanzalo como proceso aparte y guardá el
+PID (bash: `… &` y `$!`; PowerShell: `Start-Process … -PassThru`), y revisá el log
+periódicamente con un límite de tiempo.
 
 - Corre en el directorio del repo (o del worktree) donde tiene que editar.
 - Anotá el log y el PID en el Punto de reanudación de `IMPLEMENTATION.md`. El proceso
