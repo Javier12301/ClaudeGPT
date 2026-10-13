@@ -74,8 +74,11 @@ usuario; 2) tu criterio.**
 - **Vos directo** (default): arquitectura, reglas de negocio, código acoplado, cambios
   chicos, lo que ya tenés en contexto, lo que cuesta igual explicar que hacer.
 - **Script o herramienta determinista** antes que un agente, si resuelve la tarea.
-- **Worker vía Orca** (cualquier agente CLI): trabajo independiente y con criterios
-  verificables, mecánico o largo, tests delegados, reviews.
+- **Worker delegado** (cualquier agente CLI): trabajo independiente y con criterios
+  verificables, mecánico o largo, tests delegados, reviews. Codex va por `codex exec` /
+  `codex review`; los demás agentes, por Orca (detalle en `references/delegacion.md`).
+  **Nunca esperes a ciegas:** siempre con timeout, el fin lo marca el fin del proceso o
+  un `worker_done`, y si algo no avanza mirás su salida.
 - **Modelo económico** (OpenCode u otro, el modelo que nombre el usuario o el default del
   agente): datos masivos, clasificación, investigación externa acotada, transformaciones
   repetitivas, boilerplate simple. Siempre con formato de salida fijo y validación

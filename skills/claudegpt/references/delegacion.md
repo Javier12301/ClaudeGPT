@@ -8,6 +8,47 @@ usuario ni escriben documentación canónica.
 Typos, renames chicos, documentación, configuración sin comportamiento ejecutable y todo
 lo que cueste más especificar que hacer. Eso lo hacés vos.
 
+## Nunca esperar a ciegas
+
+Toda espera lleva timeout y corre en background con aviso al terminar. El fin se detecta
+por el **fin del proceso** (`codex exec`, `codex review`) o por `worker_done` (Orca). Si
+una espera supera lo razonable para el tamaño de la tarea, mirá la salida (archivo de
+log, `orca terminal read`, `worker-read`) en vez de seguir esperando: un modal, un error
+de auth o un comando trabado se ven ahí. Lo que no avanza se corta y se decide.
+
+## Qué vía usar
+
+| Ejecutor | Vía | Fin detectado por |
+|---|---|---|
+| Codex (implementar, testear) | `codex exec` directo, con sandbox | salida del proceso + archivo `-o` |
+| Codex (review) | `codex review` | salida del proceso |
+| Otros agentes (OpenCode, Gemini, Claude…) | Orca `worker-start` | `worker_done` |
+
+Codex no va por Orca: en Windows un worker Codex con sandbox hace el trabajo pero no
+puede reportar `worker_done` (named pipe de Orca, issue stablyai/orca#13539; en macOS
+#22947). Correrlo sin sandbox para esquivarlo no es aceptable. Revisá ese issue: si se
+cerró, Codex puede volver a `worker-start`.
+
+## Codex: `codex exec`
+
+Escribí la spec en un archivo temporal fuera de lo que se commitea y lanzalo en
+background, con timeout:
+
+```bash
+codex exec -s workspace-write -o <tmp>/codex-last.md - < <tmp>/spec.txt > <tmp>/codex-log.txt 2>&1
+```
+
+- Corre en el directorio del repo (o del worktree) donde tiene que editar.
+- `-o` guarda solo el mensaje final: leé ese archivo, no el log, salvo que falle.
+- Modelo pedido por el usuario: `-m <modelo>`; esfuerzo: `-c model_reasoning_effort=<nivel>`.
+- Exit ≠ 0 o archivo vacío → leé el final del log y decidí (reintentar con spec
+  corregida, hacerlo vos, o informar).
+- Dentro del sandbox de Codex en Windows, `node --test` puede no poder lanzar
+  subprocesos; la validación que importa es la que corrés vos después.
+- Si `codex` muestra "Background server has incompatible feature settings", el CLI y
+  su daemon tienen versiones distintas (`codex app-server daemon version`). Pedile al
+  usuario alinearlas: `npm i -g @openai/codex@latest` + `codex app-server daemon update`.
+
 ## Orca: ciclo mínimo supervisado
 
 Orca evoluciona rápido: antes de la primera delegación de la sesión cargá la guía que
@@ -40,7 +81,7 @@ Lanzá toda la ola independiente antes de esperar. Agente pedido con modelo conc
 - `worker-start` que no llega a `ready` (p. ej. `failedStage: agent_readiness`) deja una
   terminal: leela (`orca terminal read --terminal <handle> --json`) para ver la causa y
   seguí el `recovery` del receipt. Causas vistas: un modal del agente (aviso de update;
-  se cierra enviando Esc a la terminal) y flags duplicadas por los "default args" del
+  se cierra enviando Esc a la terminal), flags duplicadas por los "default args" del
   agente en la configuración de Orca (lo corrige el usuario en Orca → Settings → Agents).
 - Reintento sobre una terminal ya abierta:
   `worker-start --task <task_id> --retry-of <dispatch_id> --terminal <handle> --worktree <sel>`.
