@@ -58,7 +58,9 @@ amplia, desconocida y sin índice. Nada de lecturas completas ni búsquedas repe
 4. **Agentes pedidos:** verificá cada uno (`command -v <cli>`). Orca **no** valida que el
    CLI exista. Si falta, decilo y ofrecé alternativa; **nunca sustituyas en silencio**.
 5. Fases con el formato de la plantilla IMPLEMENTATION: ejecutor + motivo, validación,
-   criterio de done, commit. **Esperá aprobación.** Al aprobarse, primero escribí
+   criterio de done, commit. **Esperá aprobación.** Pedir aprobación del plan no es
+   "hacer preguntas": "sin preguntas" o "decidí vos" no la saltean; solo un pedido
+   explícito del tipo "no esperes aprobación". Al aprobarse, primero escribí
    `IMPLEMENTATION.md` en la raíz del repo.
 
 **El plan se adapta al trabajo.** Nada es obligatorio por fase: ni tests, ni delegación,
